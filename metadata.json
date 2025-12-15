@@ -1,0 +1,5 @@
+{
+  "name": "ShadowSculpt AI",
+  "description": "Create 3D shadow art sculptures from images or AI-generated silhouettes using the Gemini API.",
+  "requestFramePermissions": []
+}

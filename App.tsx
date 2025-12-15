@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Download, Settings, Box, Play, RefreshCw, Ruler, Activity, Grid as GridIcon } from 'lucide-react';
+import { Upload, Download, Settings, Box, Play, RefreshCw, Ruler, Activity, Grid as GridIcon, Zap } from 'lucide-react';
 import { Viewer3D } from './components/Viewer3D';
 import { createMask, getAlignedImageData, generateVoxelGeometry, exportToSTL } from './utils/voxelEngine';
 import * as THREE from 'three';
@@ -15,9 +15,10 @@ export default function App() {
   const [smoothingIterations, setSmoothingIterations] = useState(3);
   const [threshold, setThreshold] = useState(128);
   const [physicalHeight, setPhysicalHeight] = useState(10); 
-  
-  // Resolution State
   const [gridSize, setGridSize] = useState(200);
+  
+  // YENİ: Varsayılan 100cm (30-160 aralığında ideal orta nokta)
+  const [lightDistance, setLightDistance] = useState(100); 
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, setImg: (s: string) => void) => {
     const file = e.target.files?.[0];
@@ -40,7 +41,7 @@ export default function App() {
       const maskA = dataA ? createMask(dataA, gridSize, threshold) : null;
       const maskB = dataB ? createMask(dataB, gridSize, threshold) : null;
 
-      const geom = generateVoxelGeometry(maskA, maskB, artisticMode, smoothingIterations, physicalHeight, gridSize);
+      const geom = generateVoxelGeometry(maskA, maskB, artisticMode, smoothingIterations, physicalHeight, gridSize, lightDistance);
       
       setGeometry(geom);
     } catch (e) {
@@ -48,14 +49,14 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
-  }, [imgA, imgB, artisticMode, smoothingIterations, threshold, physicalHeight, gridSize]); 
+  }, [imgA, imgB, artisticMode, smoothingIterations, threshold, physicalHeight, gridSize, lightDistance]); 
 
   useEffect(() => {
     const timer = setTimeout(() => {
         if(imgA || imgB) processGeometry();
     }, 800);
     return () => clearTimeout(timer);
-  }, [imgA, imgB, artisticMode, smoothingIterations, threshold, physicalHeight, gridSize, processGeometry]);
+  }, [imgA, imgB, artisticMode, smoothingIterations, threshold, physicalHeight, gridSize, lightDistance, processGeometry]);
 
   const handleExport = () => {
     if (!geometry) return;
@@ -63,7 +64,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `shadow-sculpture-${physicalHeight}cm-res${gridSize}.stl`;
+    link.download = `shadow-sculpture-${physicalHeight}cm-dist${lightDistance}cm.stl`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -77,7 +78,7 @@ export default function App() {
             <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
               ShadowSculpt
             </h1>
-            <p className="text-xs text-slate-500">Dual-Axis Silhouette Projection</p>
+            <p className="text-xs text-slate-500">Perspective-Corrected Shadow Art</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -86,7 +87,7 @@ export default function App() {
              disabled={!geometry}
              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-sm font-medium transition-colors shadow-lg shadow-indigo-500/20"
            >
-             <Download size={16} /> Export STL ({physicalHeight}cm)
+             <Download size={16} /> Export STL
            </button>
         </div>
       </header>
@@ -102,6 +103,7 @@ export default function App() {
           </div>
 
           <div className="space-y-8">
+            {/* INPUT A */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
@@ -125,6 +127,7 @@ export default function App() {
               </div>
             </div>
 
+            {/* INPUT B */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-red-500"></span>
@@ -149,10 +152,26 @@ export default function App() {
             <div className="pt-4 border-t border-slate-800 space-y-5">
                <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-400 flex items-center gap-2">
-                    <Settings size={14} /> Processing
+                    <Settings size={14} /> Algorithm Settings
                   </h3>
                </div>
                
+               {/* LIGHT DISTANCE SLIDER (YENİ ARALIK: 30-160) */}
+               <div className="space-y-1 bg-indigo-900/20 p-3 rounded-md border border-indigo-500/30">
+                 <div className="flex justify-between text-xs text-slate-300 mb-1">
+                    <span className="flex items-center gap-1 font-semibold text-indigo-300"><Zap size={12}/> Light Distance</span>
+                    <span className="text-indigo-400 font-bold font-mono">{lightDistance} cm</span>
+                 </div>
+                 <input 
+                    type="range" min="30" max="160" step="5" value={lightDistance} 
+                    onChange={(e) => setLightDistance(Number(e.target.value))}
+                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                 />
+                 <p className="text-[10px] text-indigo-400/60 mt-1">
+                    Distance from sculpture to flashlight.
+                 </p>
+               </div>
+
                <div className="space-y-1">
                  <div className="flex justify-between text-xs text-slate-500">
                     <span>Threshold</span>
@@ -181,10 +200,6 @@ export default function App() {
                     onChange={(e) => setGridSize(Number(e.target.value))}
                     className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                  />
-                 <div className="flex justify-between text-[10px] text-slate-600 mt-1">
-                   <span>Low (Fast)</span>
-                   <span>Ultra High (Slow)</span>
-                 </div>
                </div>
 
                <div className="space-y-1">
@@ -223,7 +238,6 @@ export default function App() {
                   />
                   <label htmlFor="artistic" className="text-sm text-slate-300 select-none cursor-pointer">
                   Artistic "Debris" Mode
-                  <p className="text-xs text-slate-500">Adds holes and noise for sculptural look</p>
                   </label>
                </div>
             </div>
@@ -241,7 +255,7 @@ export default function App() {
         </aside>
 
         <section className="flex-1 p-6 flex flex-col gap-4 bg-slate-950 relative">
-           <Viewer3D geometry={geometry} showGrid={true} isSmooth={smoothingIterations > 0} />
+           <Viewer3D geometry={geometry} showGrid={true} isSmooth={smoothingIterations > 0} lightDistanceCM={lightDistance} />
         </section>
       </main>
     </div>

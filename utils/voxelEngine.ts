@@ -1,10 +1,5 @@
 import * as THREE from 'three';
 
-// --- YARDIMCI: 3D Noise ---
-function noise(x: number, y: number, z: number) {
-  return Math.abs(Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453) % 1;
-}
-
 // --- YARDIMCI: Laplacian Smoothing ---
 function applySmoothing(geometry: THREE.BufferGeometry, iterations: number = 2) {
   const positionAttribute = geometry.attributes.position;
@@ -32,7 +27,7 @@ function applySmoothing(geometry: THREE.BufferGeometry, iterations: number = 2) 
   }
 
   const newPositions = new Float32Array(positions);
-  const lambda = 0.8; // Smoothing gücü
+  const lambda = 0.6; 
 
   for (let k = 0; k < iterations; k++) {
     for (let i = 0; i < vertexCount; i++) {
@@ -73,7 +68,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     });
 }
 
-// --- YARDIMCI: İçerik Sınırlarını Bul (Crop) ---
+// --- YARDIMCI: Crop & Bounds ---
 function getContentBounds(ctx: CanvasRenderingContext2D, width: number, height: number) {
   const data = ctx.getImageData(0, 0, width, height).data;
   let minX = width, minY = height, maxX = 0, maxY = 0;
@@ -83,8 +78,7 @@ function getContentBounds(ctx: CanvasRenderingContext2D, width: number, height: 
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
       const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      
-      if (avg < 200) { // Koyu renkli pikselleri "içerik" say
+      if (avg < 200) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -93,14 +87,12 @@ function getContentBounds(ctx: CanvasRenderingContext2D, width: number, height: 
       }
     }
   }
-
   if (!found) return { x: 0, y: 0, w: width, h: height, isEmpty: true };
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, isEmpty: false };
 }
 
-// --- ANA FONKSİYON: Senkronize Resim İşleme ---
+// --- RESİM İŞLEME VE HİZALAMA ---
 export async function getAlignedImageData(srcA: string | null, srcB: string | null, size: number): Promise<[Uint8ClampedArray | null, Uint8ClampedArray | null]> {
-    
     const imgA = srcA ? await loadImage(srcA) : null;
     const imgB = srcB ? await loadImage(srcB) : null;
 
@@ -118,16 +110,12 @@ export async function getAlignedImageData(srcA: string | null, srcB: string | nu
     const infoA = imgA ? analyzeImage(imgA) : null;
     const infoB = imgB ? analyzeImage(imgB) : null;
 
-    // Hedef yükseklik (karenin %90'ı)
     let targetHeight = size * 0.9;
-    
     const arA = infoA && !infoA.bounds.isEmpty ? infoA.bounds.w / infoA.bounds.h : 1;
     const arB = infoB && !infoB.bounds.isEmpty ? infoB.bounds.w / infoB.bounds.h : 1;
-
     let targetWidthA = targetHeight * arA;
     let targetWidthB = targetHeight * arB;
 
-    // Sığdırma kontrolü
     if (targetWidthA > size) {
         const scale = size / targetWidthA;
         targetHeight *= scale;
@@ -147,14 +135,11 @@ export async function getAlignedImageData(srcA: string | null, srcB: string | nu
         finalCanvas.width = size;
         finalCanvas.height = size;
         const ctx = finalCanvas.getContext('2d')!;
-        
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, size, size);
-
         if (!info.bounds.isEmpty) {
             const x = (size - targetW) / 2;
             const y = (size - targetH) / 2;
-
             ctx.drawImage(
                 info.canvas,
                 info.bounds.x, info.bounds.y, info.bounds.w, info.bounds.h, 
@@ -166,11 +151,10 @@ export async function getAlignedImageData(srcA: string | null, srcB: string | nu
 
     const dataA = drawToGrid(infoA, targetWidthA, targetHeight);
     const dataB = drawToGrid(infoB, targetWidthB, targetHeight);
-
     return [dataA, dataB];
 }
 
-// --- MASKE OLUŞTURUCU ---
+// --- MASKE ---
 export function createMask(data: Uint8ClampedArray, size: number, threshold: number = 100): boolean[][] {
   const mask: boolean[][] = Array(size).fill(null).map(() => Array(size).fill(false));
   for (let y = 0; y < size; y++) {
@@ -183,24 +167,77 @@ export function createMask(data: Uint8ClampedArray, size: number, threshold: num
   return mask;
 }
 
-// --- VOXEL GEOMETRİ ---
+// --- PERSPEKTİF DÜZELTMELİ VOXEL OLUŞTURUCU ---
 export function generateVoxelGeometry(
   maskA: boolean[][] | null, 
   maskB: boolean[][] | null, 
   artisticMode: boolean, 
   smoothingIterations: number = 0,
   targetHeightCM: number = 10,
-  gridSize: number
+  gridSize: number,
+  lightDistanceCM: number = 100 // Varsayılan 1 metre
 ): THREE.BufferGeometry {
   const size = gridSize;
   const voxels: boolean[][][] = Array(size).fill(0).map(() => Array(size).fill(0).map(() => Array(size).fill(false)));
 
+  // Fiziksel CM'yi Voksel Birimine (Unit) Çevir
+  const cmToUnit = size / (targetHeightCM * 1.5); 
+  const lightDistUnits = lightDistanceCM * cmToUnit;
+
+  const center = size / 2;
+
   for (let y = 0; y < size; y++) {
-    const imgY = size - 1 - y; 
     for (let z = 0; z < size; z++) {
       for (let x = 0; x < size; x++) {
-        let solidA = !maskA || maskA[x][imgY];
-        let solidB = !maskB || maskB[z][imgY];
+        
+        const vx = x - center;
+        const vy = y - center;
+        const vz = z - center;
+
+        // --- A: ÖN IŞIK PERSPEKTİFİ ---
+        let solidA = true;
+        if (maskA) {
+            if (lightDistUnits - vz > 0.1) {
+                const factor = lightDistUnits / (lightDistUnits - vz);
+                const projX = vx * factor;
+                const projY = vy * factor;
+
+                const gridX = Math.round(projX + center);
+                const gridY = Math.round(projY + center);
+                const imgY = size - 1 - gridY;
+
+                if (gridX >= 0 && gridX < size && imgY >= 0 && imgY < size) {
+                    solidA = maskA[gridX][imgY];
+                } else {
+                    solidA = false; 
+                }
+            } else {
+                solidA = false;
+            }
+        }
+
+        // --- B: YAN IŞIK PERSPEKTİFİ ---
+        let solidB = true;
+        if (maskB) {
+            if (lightDistUnits - vx > 0.1) {
+                const factor = lightDistUnits / (lightDistUnits - vx);
+                const projZ = vz * factor;
+                const projY = vy * factor;
+
+                const gridZ = Math.round(projZ + center);
+                const gridY = Math.round(projY + center);
+                const imgY = size - 1 - gridY;
+
+                if (gridZ >= 0 && gridZ < size && imgY >= 0 && imgY < size) {
+                    solidB = maskB[gridZ][imgY];
+                } else {
+                    solidB = false;
+                }
+            } else {
+                solidB = false;
+            }
+        }
+
         let isSolid = solidA && solidB;
 
         if (isSolid && artisticMode) {
@@ -213,6 +250,7 @@ export function generateVoxelGeometry(
     }
   }
 
+  // --- MESH OLUŞTURMA ---
   const vertices: number[] = [];
   const indices: number[] = [];
   const vertexMap = new Map<string, number>();

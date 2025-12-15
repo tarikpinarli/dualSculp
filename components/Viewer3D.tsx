@@ -9,32 +9,30 @@ interface Viewer3DProps {
   geometry: THREE.BufferGeometry | null;
   showGrid: boolean;
   isSmooth: boolean; 
+  lightDistanceCM?: number;
 }
 
 // --- GALERİ ORTAMI ---
 const GalleryRoom = () => {
-  const wallSize = 6000;    
-  const wallDistance = 600; 
-  const floorLevel = -600;  
+  const wallSize = 10000;    
+  const wallDistance = 1500; 
+  const floorLevel = -800;  
 
   const wallColor = "#afa095"; 
   const floorColor = "#334155"; 
 
   return (
     <group>
-      {/* Zemin */}
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, floorLevel, 0]}>
         <planeGeometry args={[wallSize, wallSize]} />
         <meshStandardMaterial color={floorColor} roughness={0.8} metalness={0.1} />
       </mesh>
 
-      {/* Arka Duvar */}
       <mesh receiveShadow position={[0, -200, -wallDistance]}>
         <planeGeometry args={[wallSize, wallSize]} />
         <meshStandardMaterial color={wallColor} roughness={0.9} metalness={0} />
       </mesh>
 
-      {/* Sol Duvar */}
       <mesh receiveShadow rotation={[0, Math.PI / 2, 0]} position={[-wallDistance, -200, 0]}>
         <planeGeometry args={[wallSize, wallSize]} />
         <meshStandardMaterial color={wallColor} roughness={0.9} metalness={0} />
@@ -57,7 +55,7 @@ const ArtisticMaterial = ({ isSmooth }: { isSmooth: boolean }) => {
   );
 };
 
-// --- KAMERA KONTROLCÜSÜ (Özgür Gezinme + Akıllı Süzülme) ---
+// --- KAMERA KONTROLCÜSÜ (Özgür Gezinti + Yumuşak Reset) ---
 const CameraController = ({ 
   viewTrigger, 
   controlsRef,
@@ -68,27 +66,21 @@ const CameraController = ({
   geometry: THREE.BufferGeometry | null
 }) => {
   const { camera } = useThree();
-  
-  // Animasyon durumu
   const isAnimating = useRef(false);
   const finalPosition = useRef(new THREE.Vector3(700, 400, 700));
   const finalTarget = useRef(new THREE.Vector3(0, 0, 0));
   const isFirstLoad = useRef(true);
 
-  // 1. Mouse ile müdahale edilirse animasyonu durdur (ÖZGÜRLÜK)
+  // 1. Mouse ile müdahale edilirse animasyonu durdur
   useEffect(() => {
      const controls = controlsRef.current;
      if (!controls) return;
-
-     const stopAnimation = () => {
-        isAnimating.current = false;
-     };
-
+     const stopAnimation = () => { isAnimating.current = false; };
      controls.addEventListener('start', stopAnimation);
      return () => controls.removeEventListener('start', stopAnimation);
   }, [controlsRef]);
 
-  // 2. Butona basılınca hedefi güncelle ve animasyonu başlat
+  // 2. Hedef belirleme
   useEffect(() => {
     if (!geometry || !controlsRef.current) return;
     
@@ -101,19 +93,17 @@ const CameraController = ({
     finalTarget.current.copy(center);
 
     if (viewTrigger || isFirstLoad.current) {
-        
         if (viewTrigger?.type === 'front') {
-          finalPosition.current.set(0, 0, 400); 
+          finalPosition.current.set(0, 0, 1000); 
         } 
         else if (viewTrigger?.type === 'side') {
-          finalPosition.current.set(400, 0, 0); 
+          finalPosition.current.set(1000, 0, 0); 
         } 
         else {
-          // Reset View (Beğendiğin açı)
-          finalPosition.current.set(700, 400, 700); 
+          // Reset View
+          finalPosition.current.set(800, 500, 800); 
         }
 
-        // İlk açılışta animasyonsuz git
         if (isFirstLoad.current) {
              camera.position.copy(finalPosition.current);
              controlsRef.current.target.copy(finalTarget.current);
@@ -121,16 +111,14 @@ const CameraController = ({
              isFirstLoad.current = false;
              isAnimating.current = false;
         } else {
-             // Sonrasında animasyonla git
              isAnimating.current = true;
         }
     }
   }, [viewTrigger, geometry, controlsRef, camera]);
 
-  // 3. Süzülme Döngüsü
+  // 3. Animasyon Loop
   useFrame(() => {
      if (!controlsRef.current || !isAnimating.current) return;
-
      const distPos = camera.position.distanceTo(finalPosition.current);
      const distTarget = controlsRef.current.target.distanceTo(finalTarget.current);
 
@@ -150,10 +138,21 @@ const CameraController = ({
   return null;
 };
 
-// --- SAHNE İÇERİĞİ (Karanlık Gölgeler, Parlak Işıklar) ---
-const SceneContent = ({ geometry, isSmooth, lightsOn }: { geometry: THREE.BufferGeometry, isSmooth: boolean, lightsOn: boolean }) => {
+// --- SAHNE İÇERİĞİ ---
+const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry: THREE.BufferGeometry, isSmooth: boolean, lightsOn: boolean, lightDistCM: number }) => {
     const meshRef = useRef<THREE.Mesh>(null);
-    const spotIntensity = 800000; 
+    
+    // Işık gücünü mesafeye göre arttırıyoruz ki uzaktan sönük kalmasın
+    const baseIntensity = 1000000;
+    const intensityMultiplier = Math.max(1, lightDistCM / 40); 
+    const spotIntensity = baseIntensity * intensityMultiplier;
+
+    // CM -> Birim
+    const unitScale = 20; 
+    const lightDist = lightDistCM * unitScale;
+
+    // Gölge menzilini garanti altına alıyoruz
+    const effectiveRange = lightDist + 6000; 
 
     return (
         <>
@@ -163,42 +162,45 @@ const SceneContent = ({ geometry, isSmooth, lightsOn }: { geometry: THREE.Buffer
                 <ArtisticMaterial isSmooth={isSmooth} />
             </mesh>
 
-            {/* Projection modu açıkken ambient ışığı iyice kısıyoruz ki gölgeler siyah olsun */}
-            <ambientLight intensity={lightsOn ? 0.5 : 0.8} />
+            <ambientLight intensity={lightsOn ? 0.3 : 0.8} />
 
             <hemisphereLight 
-              intensity={lightsOn ? 0.05 : 0.4} 
+              intensity={lightsOn ? 0.3 : 0.4} 
               groundColor="#1a1a1a" 
               color="#ffffff"       
             />
 
             {lightsOn && (
                 <>
+                    {/* ÖN IŞIK */}
                     <SpotLight
-                        position={[0, 20, 800]} 
-                        angle={0.25}
+                        position={[0, 50, lightDist]} 
+                        angle={0.4} 
                         penumbra={0.1} 
                         intensity={spotIntensity}
                         castShadow
+                        distance={effectiveRange} 
+                        shadow-camera-far={effectiveRange} 
                         shadow-mapSize={[4096, 4096]} 
                         shadow-bias={-0.00005} 
                         target-position={[0, 0, 0]}
                         color="#ffffff"
-                        distance={3000}
                         decay={2}
                     />
 
+                    {/* YAN IŞIK */}
                     <SpotLight
-                        position={[800, 20, 0]} 
-                        angle={0.25}
+                        position={[lightDist, 50, 0]} 
+                        angle={0.4}
                         penumbra={0.1}
                         intensity={spotIntensity} 
                         castShadow
+                        distance={effectiveRange} 
+                        shadow-camera-far={effectiveRange} 
                         shadow-mapSize={[4096, 4096]}
                         shadow-bias={-0.00005}
                         target-position={[0, 0, 0]}
                         color="#ffd700" 
-                        distance={3000}
                         decay={2}
                     />
                 </>
@@ -207,7 +209,7 @@ const SceneContent = ({ geometry, isSmooth, lightsOn }: { geometry: THREE.Buffer
     );
 };
 
-export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth }) => {
+export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth, lightDistanceCM = 100 }) => {
   const [viewTrigger, setViewTrigger] = useState<{ type: string, t: number } | null>(null);
   const [lightsOn, setLightsOn] = useState(true); 
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -255,21 +257,21 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth
       </div>
 
       <Canvas shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }}>
-        <PerspectiveCamera makeDefault position={[700, 400, 700]} fov={50} near={0.1} far={6000} />
-        <OrbitControls ref={controlsRef} autoRotate={false} enableDamping={true} dampingFactor={0.05} maxPolarAngle={Math.PI / 1.5} maxDistance={3000} />
+        <PerspectiveCamera makeDefault position={[800, 500, 800]} fov={50} near={0.1} far={15000} />
+        <OrbitControls ref={controlsRef} autoRotate={false} enableDamping={true} dampingFactor={0.05} maxPolarAngle={Math.PI / 1.5} maxDistance={8000} />
         
         <CameraController viewTrigger={viewTrigger} controlsRef={controlsRef} geometry={geometry} />
         
-        {geometry && <SceneContent geometry={geometry} isSmooth={isSmooth} lightsOn={lightsOn} />}
+        {geometry && <SceneContent geometry={geometry} isSmooth={isSmooth} lightsOn={lightsOn} lightDistCM={lightDistanceCM} />}
         
-        <fog attach="fog" args={['#020617', 500, 5000]} /> 
+        <fog attach="fog" args={['#020617', 2000, 10000]} /> 
       </Canvas>
 
       {geometry && lightsOn && (
         <div className="absolute bottom-4 left-4 z-20 pointer-events-none opacity-70">
            <div className="text-[10px] text-white bg-black/60 px-3 py-2 rounded-lg border border-white/10 backdrop-blur-sm max-w-[200px]">
-             <p className="font-bold text-yellow-400 mb-1">Studio View</p>
-             <p>Use controls to rotate around the sculpture and observe shadow projections.</p>
+             <p className="font-bold text-yellow-400 mb-1">Light Distance: {lightDistanceCM}cm</p>
+             <p>Simulation and geometry adjusted for physical light source distance.</p>
            </div>
         </div>
       )}

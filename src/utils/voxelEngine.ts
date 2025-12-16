@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-// --- YARDIMCI: Laplacian Smoothing ---
+// --- YARDIMCI: Laplacian Smoothing (Yüzey Yumuşatma) ---
 function applySmoothing(geometry: THREE.BufferGeometry, iterations: number = 2) {
   const positionAttribute = geometry.attributes.position;
   const positions = positionAttribute.array as Float32Array;
@@ -167,7 +167,9 @@ export function createMask(data: Uint8ClampedArray, size: number, threshold: num
   return mask;
 }
 
-// --- PERSPEKTİF DÜZELTMELİ VOXEL OLUŞTURUCU ---
+// --- ORTHOGRAPHIC PROJECTION VOXEL GENERATOR ---
+// This creates a sculpture based on silhouettes from proper angles
+// without perspective distortion (light distance doesn't affect shape)
 export function generateVoxelGeometry(
   maskA: boolean[][] | null, 
   maskB: boolean[][] | null, 
@@ -175,82 +177,75 @@ export function generateVoxelGeometry(
   smoothingIterations: number = 0,
   targetHeightCM: number = 10,
   gridSize: number,
-  lightDistanceCM: number = 100 // Varsayılan 1 metre
+  lightDistanceCM: number = 100  // This parameter is now ignored for shape generation
 ): THREE.BufferGeometry {
   const size = gridSize;
-  const voxels: boolean[][][] = Array(size).fill(0).map(() => Array(size).fill(0).map(() => Array(size).fill(false)));
-
-  // Fiziksel CM'yi Voksel Birimine (Unit) Çevir
-  const cmToUnit = size / (targetHeightCM * 1.5); 
-  const lightDistUnits = lightDistanceCM * cmToUnit;
+  const voxels: boolean[][][] = Array(size).fill(0).map(() => 
+    Array(size).fill(0).map(() => Array(size).fill(false))
+  );
 
   const center = size / 2;
+
+  // ==========================================
+  // ORTHOGRAPHIC PROJECTION (NO PERSPECTIVE)
+  // ==========================================
+  // This creates a simple intersection of two silhouettes:
+  // - MaskA: Front view (looking along Z axis)
+  // - MaskB: Side view (looking along X axis)
+  // 
+  // A voxel at (x,y,z) is solid if:
+  // 1. Its projection onto the XY plane (front view) matches maskA
+  // 2. Its projection onto the ZY plane (side view) matches maskB
 
   for (let y = 0; y < size; y++) {
     for (let z = 0; z < size; z++) {
       for (let x = 0; x < size; x++) {
         
-        const vx = x - center;
-        const vy = y - center;
-        const vz = z - center;
-
-        // --- A: ÖN IŞIK PERSPEKTİFİ ---
         let solidA = true;
-        if (maskA) {
-            if (lightDistUnits - vz > 0.1) {
-                const factor = lightDistUnits / (lightDistUnits - vz);
-                const projX = vx * factor;
-                const projY = vy * factor;
-
-                const gridX = Math.round(projX + center);
-                const gridY = Math.round(projY + center);
-                const imgY = size - 1 - gridY;
-
-                if (gridX >= 0 && gridX < size && imgY >= 0 && imgY < size) {
-                    solidA = maskA[gridX][imgY];
-                } else {
-                    solidA = false; 
-                }
-            } else {
-                solidA = false;
-            }
-        }
-
-        // --- B: YAN IŞIK PERSPEKTİFİ ---
         let solidB = true;
-        if (maskB) {
-            if (lightDistUnits - vx > 0.1) {
-                const factor = lightDistUnits / (lightDistUnits - vx);
-                const projZ = vz * factor;
-                const projY = vy * factor;
 
-                const gridZ = Math.round(projZ + center);
-                const gridY = Math.round(projY + center);
-                const imgY = size - 1 - gridY;
-
-                if (gridZ >= 0 && gridZ < size && imgY >= 0 && imgY < size) {
-                    solidB = maskB[gridZ][imgY];
-                } else {
-                    solidB = false;
-                }
-            } else {
-                solidB = false;
-            }
+        // --- MASK A: FRONT VIEW (projection onto XY plane, looking along +Z) ---
+        if (maskA) {
+          // When looking from +Z direction, we see X (horizontal) and Y (vertical)
+          // The voxel's position in the front view is simply (x, y)
+          const imgY = size - 1 - y; // Flip Y for image coordinates
+          
+          if (x >= 0 && x < size && imgY >= 0 && imgY < size) {
+            solidA = maskA[x][imgY];
+          } else {
+            solidA = false;
+          }
         }
 
+        // --- MASK B: SIDE VIEW (projection onto ZY plane, looking along +X) ---
+        if (maskB) {
+          // When looking from +X direction, we see Z (horizontal) and Y (vertical)
+          // The voxel's position in the side view is simply (z, y)
+          const imgY = size - 1 - y; // Flip Y for image coordinates
+          
+          if (z >= 0 && z < size && imgY >= 0 && imgY < size) {
+            solidB = maskB[z][imgY];
+          } else {
+            solidB = false;
+          }
+        }
+
+        // Voxel is solid ONLY if BOTH views say it should be
         let isSolid = solidA && solidB;
 
+        // Apply artistic erosion (optional)
         if (isSolid && artisticMode) {
           const scale = 0.08; 
           const n = Math.abs(Math.sin(x * 12.9898 * scale + y * 78.233 * scale + z * 37.719 * scale) * 43758.5453) % 1;
           if (n < 0.4) isSolid = false; 
         }
+        
         voxels[x][y][z] = isSolid;
       }
     }
   }
 
-  // --- MESH OLUŞTURMA ---
+  // --- MESH GENERATION ---
   const vertices: number[] = [];
   const indices: number[] = [];
   const vertexMap = new Map<string, number>();
@@ -279,12 +274,20 @@ export function generateVoxelGeometry(
       for (let z = 0; z < size; z++) {
         if (!voxels[x][y][z]) continue;
         const cx = x, cy = y, cz = z;
-        if (x === size - 1 || !voxels[x + 1][y][z]) addQuad([cx+d, cy-d, cz+d], [cx+d, cy-d, cz-d], [cx+d, cy+d, cz-d], [cx+d, cy+d, cz+d]);
-        if (x === 0 || !voxels[x - 1][y][z]) addQuad([cx-d, cy-d, cz-d], [cx-d, cy-d, cz+d], [cx-d, cy+d, cz+d], [cx-d, cy+d, cz-d]);
-        if (y === size - 1 || !voxels[x][y + 1][z]) addQuad([cx-d, cy+d, cz+d], [cx+d, cy+d, cz+d], [cx+d, cy+d, cz-d], [cx-d, cy+d, cz-d]);
-        if (y === 0 || !voxels[x][y - 1][z]) addQuad([cx-d, cy-d, cz-d], [cx+d, cy-d, cz-d], [cx+d, cy-d, cz+d], [cx-d, cy-d, cz+d]);
-        if (z === size - 1 || !voxels[x][y][z + 1]) addQuad([cx-d, cy-d, cz+d], [cx+d, cy-d, cz+d], [cx+d, cy+d, cz+d], [cx-d, cy+d, cz+d]);
-        if (z === 0 || !voxels[x][y][z - 1]) addQuad([cx+d, cy-d, cz-d], [cx-d, cy-d, cz-d], [cx-d, cy+d, cz-d], [cx-d, cy+d, cz-d]);
+        
+        // Add faces only where adjacent to empty space
+        if (x === size - 1 || !voxels[x + 1][y][z]) 
+          addQuad([cx+d, cy-d, cz+d], [cx+d, cy-d, cz-d], [cx+d, cy+d, cz-d], [cx+d, cy+d, cz+d]);
+        if (x === 0 || !voxels[x - 1][y][z]) 
+          addQuad([cx-d, cy-d, cz-d], [cx-d, cy-d, cz+d], [cx-d, cy+d, cz+d], [cx-d, cy+d, cz-d]);
+        if (y === size - 1 || !voxels[x][y + 1][z]) 
+          addQuad([cx-d, cy+d, cz+d], [cx+d, cy+d, cz+d], [cx+d, cy+d, cz-d], [cx-d, cy+d, cz-d]);
+        if (y === 0 || !voxels[x][y - 1][z]) 
+          addQuad([cx-d, cy-d, cz-d], [cx+d, cy-d, cz-d], [cx+d, cy-d, cz+d], [cx-d, cy-d, cz+d]);
+        if (z === size - 1 || !voxels[x][y][z + 1]) 
+          addQuad([cx-d, cy-d, cz+d], [cx+d, cy-d, cz+d], [cx+d, cy+d, cz+d], [cx-d, cy+d, cz+d]);
+        if (z === 0 || !voxels[x][y][z - 1]) 
+          addQuad([cx+d, cy-d, cz-d], [cx-d, cy-d, cz-d], [cx-d, cy+d, cz-d], [cx+d, cy+d, cz-d]);
       }
     }
   }
@@ -293,6 +296,7 @@ export function generateVoxelGeometry(
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geometry.setIndex(indices);
   
+  // Apply smoothing if requested
   if (smoothingIterations > 0 && vertices.length > 0) {
     applySmoothing(geometry, smoothingIterations);
   }
@@ -300,10 +304,12 @@ export function generateVoxelGeometry(
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
 
+  // Center the geometry
   const centerOffset = new THREE.Vector3();
   geometry.boundingBox?.getCenter(centerOffset);
   geometry.translate(-centerOffset.x, -centerOffset.y, -centerOffset.z);
   
+  // Scale to target physical height
   geometry.computeBoundingBox(); 
   const box = geometry.boundingBox;
   if (box) {
@@ -318,6 +324,7 @@ export function generateVoxelGeometry(
   return geometry;
 }
 
+// --- STL EXPORT ---
 export function exportToSTL(geometry: THREE.BufferGeometry): Blob {
   const positions = geometry.attributes.position.array;
   const index = geometry.index ? geometry.index.array : null;
@@ -333,10 +340,15 @@ export function exportToSTL(geometry: THREE.BufferGeometry): Blob {
   for (let i = 0; i < triangles; i++) {
     let idx1, idx2, idx3;
     if (index) {
-      idx1 = index[i * 3]; idx2 = index[i * 3 + 1]; idx3 = index[i * 3 + 2];
+      idx1 = index[i * 3]; 
+      idx2 = index[i * 3 + 1]; 
+      idx3 = index[i * 3 + 2];
     } else {
-      idx1 = i * 3; idx2 = i * 3 + 1; idx3 = i * 3 + 2;
+      idx1 = i * 3; 
+      idx2 = i * 3 + 1; 
+      idx3 = i * 3 + 2;
     }
+    
     view.setFloat32(offset, normals[idx1 * 3], true);
     view.setFloat32(offset + 4, normals[idx1 * 3 + 1], true);
     view.setFloat32(offset + 8, normals[idx1 * 3 + 2], true);

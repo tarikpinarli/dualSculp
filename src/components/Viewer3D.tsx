@@ -94,14 +94,14 @@ const CameraController = ({
 
     if (viewTrigger || isFirstLoad.current) {
         if (viewTrigger?.type === 'front') {
-          finalPosition.current.set(0, 0, 1000); 
+          finalPosition.current.set(0, 0, 450); 
         } 
         else if (viewTrigger?.type === 'side') {
-          finalPosition.current.set(1000, 0, 0); 
+          finalPosition.current.set(450, 0, 0); 
         } 
         else {
           // Reset View
-          finalPosition.current.set(800, 500, 800); 
+          finalPosition.current.set(500, 0, 500); 
         }
 
         if (isFirstLoad.current) {
@@ -142,16 +142,24 @@ const CameraController = ({
 const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry: THREE.BufferGeometry, isSmooth: boolean, lightsOn: boolean, lightDistCM: number }) => {
     const meshRef = useRef<THREE.Mesh>(null);
     
-    // Işık gücünü mesafeye göre arttırıyoruz ki uzaktan sönük kalmasın
-    const baseIntensity = 1000000;
+    // --- NEW: Calculate the center height of the object ---
+    const centerHeight = React.useMemo(() => {
+        if (!geometry) return 0;
+        geometry.computeBoundingBox();
+        const box = geometry.boundingBox;
+        if (!box) return 0;
+        
+        // Calculate the middle Y point
+        return (box.max.y + box.min.y) / 2;
+    }, [geometry]);
+    // -----------------------------------------------------
+
+    const baseIntensity = 1700000;
     const intensityMultiplier = Math.max(1, lightDistCM / 40); 
     const spotIntensity = baseIntensity * intensityMultiplier;
 
-    // CM -> Birim
     const unitScale = 20; 
     const lightDist = lightDistCM * unitScale;
-
-    // Gölge menzilini garanti altına alıyoruz
     const effectiveRange = lightDist + 6000; 
 
     return (
@@ -174,7 +182,8 @@ const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry:
                 <>
                     {/* ÖN IŞIK */}
                     <SpotLight
-                        position={[0, 50, lightDist]} 
+                        // UPDATED: Y position uses centerHeight
+                        position={[0, centerHeight, lightDist]} 
                         angle={0.4} 
                         penumbra={0.1} 
                         intensity={spotIntensity}
@@ -183,14 +192,16 @@ const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry:
                         shadow-camera-far={effectiveRange} 
                         shadow-mapSize={[4096, 4096]} 
                         shadow-bias={-0.00005} 
-                        target-position={[0, 0, 0]}
+                        // UPDATED: Target looks at centerHeight
+                        target-position={[0, centerHeight, 0]}
                         color="#ffffff"
                         decay={2}
                     />
 
                     {/* YAN IŞIK */}
                     <SpotLight
-                        position={[lightDist, 50, 0]} 
+                        // UPDATED: Y position uses centerHeight
+                        position={[lightDist, centerHeight, 0]} 
                         angle={0.4}
                         penumbra={0.1}
                         intensity={spotIntensity} 
@@ -199,7 +210,8 @@ const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry:
                         shadow-camera-far={effectiveRange} 
                         shadow-mapSize={[4096, 4096]}
                         shadow-bias={-0.00005}
-                        target-position={[0, 0, 0]}
+                        // UPDATED: Target looks at centerHeight
+                        target-position={[0, centerHeight, 0]}
                         color="#ffd700" 
                         decay={2}
                     />

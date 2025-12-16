@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Download, Settings, Box, Play, RefreshCw, Ruler, Activity, Grid as GridIcon, Zap } from 'lucide-react';
+import { Upload, Download, Settings, Box, Play, RefreshCw, Ruler, Activity, Grid as GridIcon, Zap, X, CreditCard, Lock } from 'lucide-react';
 import { Viewer3D } from './components/Viewer3D';
 import { createMask, getAlignedImageData, generateVoxelGeometry, exportToSTL } from './utils/voxelEngine';
 import * as THREE from 'three';
+
+// --- STRIPE IMPORTS ---
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements } from "@stripe/react-stripe-js";
+import { PaymentForm } from './components/PaymentForm';
+
+// !!! IMPORTANT: REPLACE THIS WITH YOUR ACTUAL STRIPE PUBLISHABLE KEY (pk_test_...) !!!
+const stripePromise = loadStripe("pk_test_51SQbhxPxxqommwsYtjFccQn2VNOLtYZbxS3i8T25TlJF50nf6SuJw7aJg6Sst86xCqTVEKOJnQ7j4tmuOOrdU6NV00WXm5dzaN");
 
 export default function App() {
   const [imgA, setImgA] = useState<string | null>(null);
@@ -10,14 +18,18 @@ export default function App() {
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Parametreler
+  // Payment State
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [clientSecret, setClientSecret] = useState("");
+
+  // Parameters
   const [artisticMode, setArtisticMode] = useState(false);
   const [smoothingIterations, setSmoothingIterations] = useState(3);
   const [threshold, setThreshold] = useState(128);
   const [physicalHeight, setPhysicalHeight] = useState(10); 
   const [gridSize, setGridSize] = useState(200);
   
-  // YENİ: Varsayılan 100cm (30-160 aralığında ideal orta nokta)
+  // Light Distance (30-160cm range)
   const [lightDistance, setLightDistance] = useState(100); 
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, setImg: (s: string) => void) => {
@@ -58,7 +70,31 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [imgA, imgB, artisticMode, smoothingIterations, threshold, physicalHeight, gridSize, lightDistance, processGeometry]);
 
-  const handleExport = () => {
+  // --- 1. HANDLE EXPORT CLICK (Opens Modal & Talks to Server) ---
+  const handleExportClick = async () => {
+    if (!geometry) return;
+    setShowPaymentModal(true); // Open the modal immediately
+
+    // Connect to your local backend to get the payment ID
+    try {
+        const res = await fetch("http://localhost:4242/create-payment-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+        });
+        const data = await res.json();
+        setClientSecret(data.clientSecret);
+    } catch (error) {
+        console.error("Error connecting to server:", error);
+        alert("Could not connect to payment server. Make sure 'node server.js' is running!");
+    }
+  };
+
+  // --- 2. HANDLE SUCCESS (Executes the Download) ---
+  const handlePaymentSuccess = () => {
+    setShowPaymentModal(false);
+    setClientSecret(""); // Reset for next time
+
+    // This is your original download logic
     if (!geometry) return;
     const blob = exportToSTL(geometry);
     const url = URL.createObjectURL(blob);
@@ -69,8 +105,19 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Stripe UI Theme Settings
+  const appearance = {
+    theme: 'night' as const,
+    labels: 'floating' as const,
+    variables: {
+      colorPrimary: '#6366f1',
+      colorBackground: '#1e293b',
+      colorText: '#f8fafc',
+    },
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-200 font-sans">
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-200 font-sans relative">
       <header className="flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Box className="w-8 h-8 text-indigo-500" />
@@ -82,8 +129,9 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+           {/* UPDATED BUTTON: Calls handleExportClick instead of direct download */}
            <button 
-             onClick={handleExport}
+             onClick={handleExportClick}
              disabled={!geometry}
              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-sm font-medium transition-colors shadow-lg shadow-indigo-500/20"
            >
@@ -156,7 +204,7 @@ export default function App() {
                   </h3>
                </div>
                
-               {/* LIGHT DISTANCE SLIDER (YENİ ARALIK: 30-160) */}
+               {/* LIGHT DISTANCE SLIDER */}
                <div className="space-y-1 bg-indigo-900/20 p-3 rounded-md border border-indigo-500/30">
                  <div className="flex justify-between text-xs text-slate-300 mb-1">
                     <span className="flex items-center gap-1 font-semibold text-indigo-300"><Zap size={12}/> Light Distance</span>
@@ -187,14 +235,14 @@ export default function App() {
                <div className="space-y-1">
                  <div className="flex justify-between text-xs text-slate-500">
                     <span className="flex items-center gap-1"><GridIcon size={12}/> Resolution</span>
-                    <span className={`font-mono font-bold ${gridSize > 300 ? 'text-red-400' : 'text-indigo-400'}`}>
+                    <span className={`font-mono font-bold ${gridSize > 200 ? 'text-red-400' : 'text-indigo-400'}`}>
                       {gridSize}px
                     </span>
                  </div>
                  <input 
                     type="range" 
                     min="100" 
-                    max="600" 
+                    max="250" 
                     step="10"
                     value={gridSize} 
                     onChange={(e) => setGridSize(Number(e.target.value))}
@@ -258,6 +306,44 @@ export default function App() {
            <Viewer3D geometry={geometry} showGrid={true} isSmooth={smoothingIterations > 0} lightDistanceCM={lightDistance} />
         </section>
       </main>
+
+      {/* --- STRIPE PAYMENT MODAL --- */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+                <button 
+                    onClick={() => setShowPaymentModal(false)}
+                    className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors z-10"
+                >
+                    <X size={20} />
+                </button>
+                
+                <div className="p-8 flex flex-col items-center">
+                    <div className="w-12 h-12 bg-indigo-500/10 rounded-full flex items-center justify-center mb-4 ring-1 ring-indigo-500/30">
+                        <Download className="w-6 h-6 text-indigo-400" />
+                    </div>
+                    
+                    <h3 className="text-xl font-bold text-white mb-1">Export STL File</h3>
+                    <p className="text-slate-400 mb-6 text-sm">Total: <span className="text-white font-bold">$0.99</span></p>
+
+                    {clientSecret ? (
+                        <Elements options={{ clientSecret, appearance }} stripe={stripePromise}>
+                            <PaymentForm onSuccess={handlePaymentSuccess} onCancel={() => setShowPaymentModal(false)} />
+                        </Elements>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-slate-500">
+                            <RefreshCw className="animate-spin mb-2" />
+                            <span className="text-sm">Initializing Secure Payment...</span>
+                        </div>
+                    )}
+                    
+                    <div className="mt-6 flex items-center gap-2 text-xs text-slate-500">
+                        <Lock size={12} /> <span>Secure Encrypted Payment</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 }

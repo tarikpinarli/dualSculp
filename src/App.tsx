@@ -77,7 +77,7 @@ export default function App() {
 
     // Connect to your local backend to get the payment ID
     try {
-        const res = await fetch("http://localhost:4242/create-payment-intent", {
+        const res = await fetch("https://shadow-sculpture-backend.onrender.com/create-payment-intent", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
         });

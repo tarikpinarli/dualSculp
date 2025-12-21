@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, SpotLight } from '@react-three/drei';
-import { Layers, Monitor, RotateCcw, Lightbulb, LightbulbOff, Zap, ScanLine, ChevronDown, ChevronUp, Video, Loader2, UploadCloud } from 'lucide-react';
+import { Layers, Monitor, RotateCcw, Lightbulb, LightbulbOff, Zap, ScanLine, ChevronDown, ChevronUp, Video, Loader2, UploadCloud, Orbit } from 'lucide-react';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
@@ -10,7 +10,9 @@ interface Viewer3DProps {
   showGrid: boolean;
   isSmooth: boolean; 
   lightDistanceCM?: number;
-  isProcessing: boolean; // <--- NEW PROP
+  isProcessing: boolean;
+  fileSize?: string | null;
+  color?: string; // --- NEW: Optional Color Prop ---
 }
 
 // --- SIMULATION ROOM (Unchanged) ---
@@ -39,14 +41,14 @@ const SimulationRoom = () => {
   );
 };
 
-// --- SCULPTURE MATERIAL (Unchanged) ---
-const ArtisticMaterial = ({ isSmooth }: { isSmooth: boolean }) => {
+// --- SCULPTURE MATERIAL (Updated to handle Color) ---
+const ArtisticMaterial = ({ isSmooth, color }: { isSmooth: boolean, color?: string }) => {
   return (
     <meshStandardMaterial
-      color="#f1f5f9"         
+      color={color || "#f1f5f9"} // Use custom color if provided, else default white
       flatShading={!isSmooth}     
-      roughness={0.1}         
-      metalness={0.5}
+      roughness={0.2}         
+      metalness={0.4}
       side={THREE.DoubleSide} 
       shadowSide={THREE.DoubleSide} 
     />
@@ -121,8 +123,8 @@ const CameraController = ({
   return null;
 };
 
-// --- SCENE CONTENT (Unchanged) ---
-const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry: THREE.BufferGeometry, isSmooth: boolean, lightsOn: boolean, lightDistCM: number }) => {
+// --- SCENE CONTENT (Updated) ---
+const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM, color }: { geometry: THREE.BufferGeometry, isSmooth: boolean, lightsOn: boolean, lightDistCM: number, color?: string }) => {
     const meshRef = useRef<THREE.Mesh>(null);
     const centerHeight = React.useMemo(() => {
         if (!geometry) return 0;
@@ -143,7 +145,7 @@ const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry:
         <>
             {lightsOn && <SimulationRoom />}
             <mesh ref={meshRef} geometry={geometry} castShadow receiveShadow position={[0, 0, 0]}>
-                <ArtisticMaterial isSmooth={isSmooth} />
+                <ArtisticMaterial isSmooth={isSmooth} color={color} />
             </mesh>
             <ambientLight intensity={lightsOn ? 0.4 : 0.8} />
             <hemisphereLight intensity={lightsOn ? 0.2 : 0.4} groundColor="#111111" color="#ffffff" />
@@ -157,14 +159,39 @@ const SceneContent = ({ geometry, isSmooth, lightsOn, lightDistCM }: { geometry:
     );
 };
 
-export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth, lightDistanceCM = 100, isProcessing }) => {
+export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth, lightDistanceCM = 100, isProcessing, color }) => {
   const [viewTrigger, setViewTrigger] = useState<{ type: string, t: number } | null>(null);
   const [lightsOn, setLightsOn] = useState(true); 
   const [controlsOpen, setControlsOpen] = useState(true); 
+  const [autoRotate, setAutoRotate] = useState(false);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
-  const handleViewChange = (type: string) => setViewTrigger({ type, t: Date.now() });
-  const handleReset = () => setViewTrigger({ type: 'iso', t: Date.now() });
+  const handleViewChange = (type: string) => {
+    setAutoRotate(false);
+    setViewTrigger({ type, t: Date.now() });
+  };
+  const handleReset = () => {
+    setAutoRotate(false);
+    setViewTrigger({ type: 'iso', t: Date.now() });
+  };
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const handleInteraction = () => {
+       // @ts-ignore
+       const currentState = controls.state;
+       const isZooming = currentState === 1 || currentState === 5; 
+
+       if (!isZooming) {
+         setAutoRotate(false);
+       }
+    };
+
+    controls.addEventListener('start', handleInteraction);
+    return () => controls.removeEventListener('start', handleInteraction);
+  }, []); 
 
   const HudButton = ({ onClick, icon: Icon, text, subtext, active = false, warning = false }: any) => (
     <button 
@@ -192,11 +219,10 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth
   return (
     <div className="w-full h-full bg-black rounded-sm overflow-hidden shadow-2xl border border-white/10 relative group">
       
-      {/* --- 🚀 NEW: INTELLIGENT OVERLAY STATE --- */}
+      {/* --- OVERLAY STATE --- */}
       {!geometry && (
         <div className="absolute inset-0 flex flex-col gap-4 items-center justify-center z-10 pointer-events-none bg-black/40 backdrop-blur-sm">
           {isProcessing ? (
-             // PROCESSING STATE
              <>
                <div className="w-16 h-16 border-2 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin shadow-[0_0_30px_rgba(34,211,238,0.2)]"></div>
                <div className="flex flex-col items-center">
@@ -205,7 +231,6 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth
                </div>
              </>
           ) : (
-             // STANDBY STATE (Initial Load)
              <>
                <div className="relative">
                   <div className="absolute inset-0 bg-zinc-500/20 blur-xl rounded-full"></div>
@@ -220,7 +245,7 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth
         </div>
       )}
       
-      {/* --- COLLAPSIBLE HUD CONTROLS --- */}
+      {/* --- HUD CONTROLS --- */}
       <div className={`absolute top-4 right-4 z-20 flex flex-col items-end transition-all duration-300 pointer-events-auto ${controlsOpen ? 'w-48' : 'w-auto'}`}>
         <button 
             onClick={() => setControlsOpen(!controlsOpen)}
@@ -246,7 +271,7 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth
 
         <div className={`
             w-full overflow-hidden transition-all duration-300 ease-in-out bg-black/20 backdrop-blur-sm border-white/5 shadow-lg
-            ${controlsOpen ? 'max-h-64 opacity-100 border p-1' : 'max-h-0 opacity-0 border-0 p-0'}
+            ${controlsOpen ? 'max-h-80 opacity-100 border p-1' : 'max-h-0 opacity-0 border-0 p-0'}
         `}>
             <div className="flex flex-col gap-1">
                 <HudButton 
@@ -260,15 +285,41 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({ geometry, showGrid, isSmooth
                 <HudButton onClick={() => handleViewChange('front')} icon={Monitor} text="Front Cam" subtext="AXIS: Z-POS" />
                 <HudButton onClick={() => handleViewChange('side')} icon={Layers} text="Side Cam" subtext="AXIS: X-POS" />
                 <HudButton onClick={handleReset} icon={RotateCcw} text="Reset View" subtext="ISOMETRIC" />
+                <HudButton 
+                    onClick={() => setAutoRotate(!autoRotate)} 
+                    icon={Orbit} 
+                    text="Cinematic Orbit" 
+                    subtext={autoRotate ? "ROTATION: ACTIVE" : "AUTO-PAN"} 
+                    active={autoRotate}
+                />
             </div>
         </div>
       </div>
 
       <Canvas shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }}>
         <PerspectiveCamera makeDefault position={[800, 500, 800]} fov={50} near={0.1} far={15000} />
-        <OrbitControls makeDefault ref={controlsRef} autoRotate={false} enableDamping={true} dampingFactor={0.05} maxPolarAngle={Math.PI / 1.5} maxDistance={8000} />
+        <OrbitControls 
+            makeDefault 
+            ref={controlsRef} 
+            autoRotate={autoRotate}
+            autoRotateSpeed={2.0} 
+            enableDamping={true} 
+            dampingFactor={0.05} 
+            maxPolarAngle={Math.PI / 1.5} 
+            maxDistance={8000} 
+        />
         <CameraController viewTrigger={viewTrigger} controlsRef={controlsRef} geometry={geometry} />
-        {geometry && <SceneContent geometry={geometry} isSmooth={isSmooth} lightsOn={lightsOn} lightDistCM={lightDistanceCM} />}
+        
+        {geometry && (
+            <SceneContent 
+                geometry={geometry} 
+                isSmooth={isSmooth} 
+                lightsOn={lightsOn} 
+                lightDistCM={lightDistanceCM} 
+                color={color} // --- PASSING COLOR ---
+            />
+        )}
+        
         <fog attach="fog" args={['#000000', 4000, 15000]} /> 
       </Canvas>
 

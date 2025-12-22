@@ -48,7 +48,7 @@ const handleSubmit = async (e: React.FormEvent) => {
             layout: "tabs",
             fields: {
                 billingDetails: {
-                    address: 'never' // This removes Country, Zip, and Address lines
+                    address: 'auto' // This removes Country, Zip, and Address lines
                 }
             }
         }}

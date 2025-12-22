@@ -2,55 +2,57 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios'); // Ensure you ran: npm install axios
+const axios = require('axios');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 app.use(cors());
-// Increased limit for high-res images
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const MESHY_API_KEY = process.env.MESHY_API_KEY; 
 
-// --- 🛡️ HELPER: CHECK MESHY CREDITS ---
+// --- HELPER: CHECK CREDITS ---
 async function checkMeshyCredits() {
     try {
-        // This is an undocumented Meshy endpoint, but standard for their API
-        // If it fails, we default to "True" to avoid blocking valid sales during API glitches
         const res = await axios.get("https://api.meshy.ai/openapi/v1/balance", {
             headers: { "Authorization": `Bearer ${MESHY_API_KEY}` }
         });
-        
         const available = res.data.balance || 0;
-        console.log(`🔋 Meshy Balance: ${available} Credits`);
-        
-        // We need ~20-25 credits per generation
+        console.log(`🔋 Meshy Balance: ${available}`);
         return available >= 25; 
     } catch (e) {
-        console.warn("⚠️ Could not check balance, assuming online.");
+        console.warn("⚠️ Balance check failed, assuming online.");
         return true; 
     }
 }
 
-// --- STRIPE PAYMENT (With Live Inventory Check) ---
+// --- STRIPE PAYMENT (DYNAMIC PRICING) ---
 app.post('/create-payment-intent', async (req, res) => {
-  
-  // 1. SAFETY CHECK: Do we have credits?
-  const hasCredits = await checkMeshyCredits();
+  const { product } = req.body; // Receive product type from frontend
 
-  if (!hasCredits) {
-      console.log("🛑 Pre-Check Failed: Not enough credits. Blocking payment.");
-      return res.status(503).json({ 
-          error: "High Demand: Our GPU capacity is currently full. Please try again later.",
-          code: "SOLD_OUT"
-      });
+  let amount = 99; // 🟢 DEFAULT PRICE: $0.99 (Shadow/Wall Art)
+
+  // 🔴 SPECIAL PRICE FOR MESHY: $1.99
+  if (product === 'meshy') {
+      amount = 199; 
+
+      // Only check credits if buying Meshy!
+      const hasCredits = await checkMeshyCredits();
+      if (!hasCredits) {
+          console.log("🛑 Meshy Sold Out. Blocking Payment.");
+          return res.status(503).json({ 
+              error: "High Demand: GPU capacity full.",
+              code: "SOLD_OUT"
+          });
+      }
   }
 
-  // 2. PROCEED TO SALE
+  console.log(`💰 New Checkout: ${product || 'Standard'} Item - $${amount/100}`);
+
   try {
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: 199, // $1.99 Price Point
+      amount: amount, 
       currency: "usd",
       automatic_payment_methods: { enabled: true },
     });
@@ -60,43 +62,43 @@ app.post('/create-payment-intent', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
+app.get('/debug-stripe', (req, res) => {
+    const key = process.env.STRIPE_SECRET_KEY || "No Key Found";
+    // We only check the first few letters for security
+    const mode = key.startsWith("sk_test") ? "🟢 TEST MODE" : "🔴 LIVE MODE";
+    const keyHint = key.substring(0, 8) + "...";
+    
+    res.json({
+        status: "Online",
+        stripe_mode: mode,
+        key_prefix: keyHint
+    });
+});
 app.listen(4242, () => console.log('Server running on port 4242'));
 
-// --- MESHY PROXY ---
+// --- MESHY PROXY (Keep the same) ---
 app.post('/api/meshy/create', async (req, res) => {
   const { paymentIntentId, ...meshyPayload } = req.body;
 
   try {
-    console.log("🚀 Sending request to Meshy...");
-    
     const response = await axios.post("https://api.meshy.ai/openapi/v1/image-to-3d", meshyPayload, {
       headers: {
         "Authorization": `Bearer ${MESHY_API_KEY}`,
         "Content-Type": "application/json"
       }
     });
-    
     res.json(response.data);
-
   } catch (error) {
     const errorMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-    console.error("❌ Meshy Error:", errorMsg);
-
-    // 🚨 BACKUP REFUND: If generation fails after they paid
+    
+    // Backup Refund Logic
     if (paymentIntentId) {
-        console.log(`💸 Issuing Backup Refund for ${paymentIntentId}...`);
         await refundUser(paymentIntentId);
     }
-
-    res.status(500).json({ 
-        error: "Generation Failed. You have been automatically refunded.", 
-        details: errorMsg 
-    });
+    res.status(500).json({ error: "Generation Failed", details: errorMsg });
   }
 });
 
-// Polling Route
 app.get('/api/meshy/status/:id', async (req, res) => {
     try {
         const response = await axios.get(`https://api.meshy.ai/openapi/v1/image-to-3d/${req.params.id}`, {
@@ -111,8 +113,5 @@ app.get('/api/meshy/status/:id', async (req, res) => {
 async function refundUser(paymentIntentId) {
     try {
         await stripe.refunds.create({ payment_intent: paymentIntentId });
-        console.log("✅ Refund Successful");
-    } catch (err) {
-        console.error("❌ CRITICAL: Refund Failed", err.message);
-    }
+    } catch (err) { console.error("Refund Failed", err.message); }
 }

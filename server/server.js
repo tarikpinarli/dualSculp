@@ -11,7 +11,7 @@ app.use(express.json());
 // 1. Define Module Prices (Server-Side Source of Truth)
 const MODULE_PRICES = {
   'intersection-basic': 99,   // $0.99
-  'wall-art-basic': 199,      // $2.99 (Example for future module)
+  'wall-art-basic': 299,      // $2.99 (Example for future module)
   'pro-suite': 1499           // $14.99
 };
 

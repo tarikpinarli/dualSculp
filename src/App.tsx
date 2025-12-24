@@ -4,6 +4,7 @@ import Landing from './pages/Landing';
 import IntersectionModule from './modules/Intersection'; 
 // 👇 IMPORT THE NEW MODULE
 import WallArtModule from './modules/WallArt/'; 
+import GeoSculptorModule from './modules/GeoSculptor';
 
 export default function App() {
   return (
@@ -16,7 +17,7 @@ export default function App() {
         
         {/* 👇 NEW WALL ART TOOL */}
         <Route path="/wall-art" element={<WallArtModule />} />
-        
+        <Route path="/geo" element={<GeoSculptorModule />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

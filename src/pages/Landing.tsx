@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Layers, Mic, Box, ArrowRight, Lock, Activity, Copy, ChevronDown } from 'lucide-react';
+import { Layers, Mic, Box, ArrowRight, Lock, Activity, Copy, ChevronDown, Mountain } from 'lucide-react';
 
 // --- DATA ---
 const MODULES = [
@@ -14,16 +14,15 @@ const MODULES = [
     color: 'cyan',
     videoOverlay: '/module_videos/apple_steve_shadow.mov'
   },
-  // 👇 UPDATED: Replaced the locked Audio tool with the new Meshy tool
   {
     id: 'meshy',
     name: 'Neural Latent',
     desc: 'Generative AI 3D modeling. Upload a single 2D image and let our neural core hallucinate a 3D mesh in seconds.',
-    icon: Activity, // Or Sparkles if you import it
+    icon: Activity, 
     path: '/meshy',
-    status: 'ONLINE', // It is now ready!
+    status: 'ONLINE', 
     color: 'purple',
-    videoOverlay: null // You might want to change this video later
+    videoOverlay: null 
   },
   {
     id: 'litho',
@@ -34,6 +33,17 @@ const MODULES = [
     status: 'ONLINE',
     color: 'zinc',
     videoOverlay: '/module_videos/tablo.mov'
+  },
+  // 👇 NEW MODULE ADDED HERE
+  {
+    id: 'geo',
+    name: 'Terra-Former',
+    desc: 'Topographic generator. Stream real-world satellite telemetry to create solid, printable terrain of any location on Earth.',
+    icon: Mountain,
+    path: '/geo',
+    status: 'ONLINE',
+    color: 'cyan',
+    videoOverlay: null // Placeholder for now
   }
 ];
 

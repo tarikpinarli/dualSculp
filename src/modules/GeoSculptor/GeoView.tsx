@@ -15,8 +15,14 @@ import {
 } from 'lucide-react';
 
 // --- Types ---
+// UPDATE: Added 'roads' to the interface so TypeScript knows it exists
 interface GeoViewProps {
-  modelData: { buildings: THREE.BufferGeometry | null, base: THREE.BufferGeometry } | null;
+  modelData: { 
+      buildings: THREE.BufferGeometry | null, 
+      base: THREE.BufferGeometry,
+      roads?: THREE.BufferGeometry | null,
+      water?: THREE.BufferGeometry | null
+  } | null;
   color: string;
   isProcessing: boolean;
 }
@@ -156,6 +162,8 @@ const SceneContent = ({
 }: { modelData: any, color: string, autoRotate: boolean }) => {
   const VIBE_CYAN = "#06b6d4"; 
   const VIBE_DARK_BASE = "#27272a"; 
+  const VIBE_ROAD = "#18181b"; // Dark Asphalt
+  const VIBE_WATER = "#0e7490";
 
   return (
     <>
@@ -188,6 +196,31 @@ const SceneContent = ({
                         metalness={0.4} 
                         side={THREE.DoubleSide} 
                     />
+                    </mesh>
+                )}
+
+                {/* UPDATE: ROADS (Rendered in Dark Asphalt) */}
+                {modelData?.roads && (
+                    <mesh geometry={modelData.roads}>
+                        <meshStandardMaterial 
+                            color={VIBE_ROAD}
+                            roughness={0.9} 
+                            metalness={0.1}
+                            side={THREE.DoubleSide} 
+                        />
+                    </mesh>
+                )}
+                {/* WATER (NEW) */}
+                {modelData?.water && (
+                    <mesh geometry={modelData.water}>
+                        <meshStandardMaterial 
+                            color={VIBE_WATER} 
+                            roughness={0.1} // shiny
+                            metalness={0.8} // reflective
+                            emissive={VIBE_WATER}
+                            emissiveIntensity={0.2}
+                            side={THREE.DoubleSide} 
+                        />
                     </mesh>
                 )}
 

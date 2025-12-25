@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mountain, RotateCcw, Building2, Globe, Loader2, Search, MapPin, ScanLine } from 'lucide-react';
+import { 
+    Mountain, 
+    RotateCcw, 
+    Building2, 
+    Globe, 
+    Loader2, 
+    Search, 
+    MapPin, 
+    ScanLine, 
+    Waypoints, 
+    Waves 
+} from 'lucide-react';
 import * as THREE from 'three';
 import { STLExporter } from 'three-stdlib';
 
@@ -9,7 +20,12 @@ import { PaymentModal } from '../../components/PaymentModal';
 import { usePayment } from '../../hooks/usePayment';
 import { GeoView } from './GeoView';
 import { MapSelector, MapSelectorRef } from './MapSelector';
-import { fetchTerrainGeometry, fetchBuildingsGeometry } from '../../utils/geoEngine';
+import { 
+    fetchTerrainGeometry, 
+    fetchBuildingsGeometry, 
+    fetchRoadsGeometry, 
+    fetchWaterGeometry 
+} from '../../utils/geoEngine';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -71,25 +87,42 @@ const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => v
 };
 
 export default function GeoSculptorModule() {
-  // 1. PAYMENT HOOK
   const { showModal, clientSecret, startCheckout, closeModal } = usePayment('geo-sculptor-basic');
-  
   const mapRef = useRef<MapSelectorRef>(null);
 
   // --- STATE ---
   const [mode, setMode] = useState<'SELECT' | 'VIEW'>('SELECT');
-  const [modelData, setModelData] = useState<{ buildings: THREE.BufferGeometry | null, base: THREE.BufferGeometry } | null>(null);
+  
+  // Model Data extended to include water
+  const [modelData, setModelData] = useState<{ 
+      buildings: THREE.BufferGeometry | null, 
+      base: THREE.BufferGeometry, 
+      roads?: THREE.BufferGeometry | null,
+      water?: THREE.BufferGeometry | null 
+  } | null>(null);
+  
   const [status, setStatus] = useState<string>(""); 
   const [isProcessing, setIsProcessing] = useState(false);
   const [coords, setCoords] = useState<{lat: number, lon: number, zoom: number, radius: number} | null>(null);
   
   // Params
   const [isCityMode, setIsCityMode] = useState(true); 
+  const [isRoadsEnabled, setIsRoadsEnabled] = useState(false); 
+  const [isWaterEnabled, setIsWaterEnabled] = useState(false); 
   const [exaggeration, setExaggeration] = useState(1.0); 
 
   // --- ACTIONS ---
 
-  // Trigger from "Capture Area" button
+  // 1. RESET Logic
+  const handleReset = () => {
+      setMode('SELECT');
+      setModelData(null);
+      setCoords(null);
+      // Reset toggles to default
+      setIsRoadsEnabled(false);
+      setIsWaterEnabled(false);
+  };
+
   const triggerCapture = () => {
       if (mapRef.current) {
           const selection = mapRef.current.getSelection();
@@ -101,69 +134,112 @@ export default function GeoSculptorModule() {
 
   const handleMapConfirm = async (selectedCoords: { lat: number, lon: number, zoom: number, radius: number }) => {
       setCoords(selectedCoords);
+      // Clear data immediately to show loading state
+      setModelData(null); 
       setMode('VIEW');
-      generateModel(selectedCoords, isCityMode, exaggeration);
+      // Trigger generation (forcing fresh fetch)
+      generateModel(selectedCoords, isCityMode, isRoadsEnabled, isWaterEnabled, exaggeration, true);
   };
 
+  // Main Generator Logic
   const generateModel = async (
       c: {lat:number, lon:number, radius: number}, 
-      cityMode: boolean, 
-      exagg: number
+      cityMode: boolean,
+      roadsEnabled: boolean,
+      waterEnabled: boolean,
+      exagg: number,
+      forceFresh: boolean = false
   ) => {
       setIsProcessing(true);
-      setModelData(null); 
-      setStatus("Initializing Satellite Data...");
+      if (forceFresh) setModelData(null); 
+      setStatus("Processing Data...");
 
       try {
-          let result;
-          if (cityMode) {
-             result = await fetchBuildingsGeometry(c.lat, c.lon, c.radius, setStatus);
-          } else {
-             setStatus("Fetching Digital Elevation Model...");
-             result = await fetchTerrainGeometry(c.lat, c.lon, 12, exagg);
+          // If we have existing data and we are just toggling layers, try to preserve the base/buildings
+          let currentBuildings = (forceFresh) ? null : (modelData?.buildings || null);
+          let currentBase = (forceFresh) ? null : (modelData?.base || null);
+          let currentRoads = (forceFresh) ? null : (modelData?.roads || null);
+          let currentWater = (forceFresh) ? null : (modelData?.water || null);
+
+          // 1. Fetch Buildings/Terrain (The Core Geometry)
+          // Fetch if missing OR if we forced a refresh OR if mode changed
+          const needsFreshGeo = !currentBase || (cityMode && !currentBuildings && !forceFresh) || (!cityMode && !currentBase && !forceFresh) || forceFresh;
+
+          if (needsFreshGeo) {
+              if (cityMode) {
+                 const res = await fetchBuildingsGeometry(c.lat, c.lon, c.radius, setStatus);
+                 currentBuildings = res.buildings;
+                 currentBase = res.base;
+              } else {
+                 setStatus("Fetching Digital Elevation Model...");
+                 const res = await fetchTerrainGeometry(c.lat, c.lon, 12, exagg);
+                 currentBuildings = res.buildings; 
+                 currentBase = res.base;
+              }
           }
-          setModelData(result);
+
+          // 2. Fetch Roads (Independent Layer)
+          if (roadsEnabled && cityMode) {
+              if (!currentRoads || forceFresh) {
+                 setStatus("Tracing Highway Network...");
+                 const roadGeom = await fetchRoadsGeometry(c.lat, c.lon, c.radius);
+                 currentRoads = roadGeom;
+              }
+          } else {
+              currentRoads = null; 
+          }
+
+          // 3. Fetch Water (Independent Layer)
+          if (waterEnabled && cityMode) {
+              if (!currentWater || forceFresh) {
+                 setStatus("Mapping Water Bodies...");
+                 const waterGeom = await fetchWaterGeometry(c.lat, c.lon, c.radius);
+                 currentWater = waterGeom;
+              }
+          } else {
+              currentWater = null;
+          }
+
+          // 4. Update State
+          setModelData({
+              buildings: currentBuildings,
+              base: currentBase!,
+              roads: currentRoads,
+              water: currentWater
+          });
+
       } catch(e: any) {
           console.error(e);
           alert(`Error: ${e.message}`);
-          setMode('SELECT');
+          handleReset();
       } finally {
           setIsProcessing(false);
           setStatus("");
       }
   };
 
-  // Re-generate on Slider Change (Debounced)
+  // Re-generate on Param Change (Debounced)
   useEffect(() => {
      if (mode === 'VIEW' && coords) {
-         const timer = setTimeout(() => generateModel(coords, isCityMode, exaggeration), 800);
+         const timer = setTimeout(() => generateModel(coords, isCityMode, isRoadsEnabled, isWaterEnabled, exaggeration, false), 500);
          return () => clearTimeout(timer);
      }
-  }, [exaggeration, isCityMode]); 
+  }, [exaggeration, isCityMode, isRoadsEnabled, isWaterEnabled]); 
 
-  // --- 2. EXPORT LOGIC (Connected to Payment Success) ---
+  // --- 2. EXPORT LOGIC ---
   const handleDownload = () => {
     if (!modelData) return;
     
-    // Create a temporary group to hold both parts for a single export
     const group = new THREE.Group();
     
-    // Add Base
-    if (modelData.base) {
-        const baseMesh = new THREE.Mesh(modelData.base);
-        group.add(baseMesh);
-    }
-    
-    // Add Buildings
-    if (modelData.buildings) {
-        const buildingMesh = new THREE.Mesh(modelData.buildings);
-        group.add(buildingMesh);
-    }
+    if (modelData.base) group.add(new THREE.Mesh(modelData.base));
+    if (modelData.buildings) group.add(new THREE.Mesh(modelData.buildings));
+    if (modelData.roads) group.add(new THREE.Mesh(modelData.roads));
+    if (modelData.water) group.add(new THREE.Mesh(modelData.water));
 
     const exporter = new STLExporter();
-    const result = exporter.parse(group); // Exports the whole group as one STL
+    const result = exporter.parse(group);
     
-    // Trigger Browser Download
     const blob = new Blob([result], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -171,7 +247,6 @@ export default function GeoSculptorModule() {
     link.download = `geo_sculptor_${Date.now()}.stl`; 
     link.click();
     
-    // Clean up
     closeModal();
   };
 
@@ -181,16 +256,14 @@ export default function GeoSculptorModule() {
         title="Terra-Former"
         subtitle="Topographic Generator"
         color="cyan"
-        // 3. ENABLE EXPORT BUTTON only when we have data
         canExport={!!modelData && mode === 'VIEW' && !isProcessing}
-        // 4. CLICKING EXPORT TRIGGERS STRIPE
         onExport={startCheckout}
         sidebar={
           <div className="space-y-6">
             
             {mode === 'VIEW' && (
                 <button 
-                    onClick={() => setMode('SELECT')}
+                    onClick={handleReset}
                     className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-3 rounded-sm text-xs font-bold uppercase tracking-wider transition-all mb-4"
                 >
                     <RotateCcw size={14} /> Select New Area
@@ -214,6 +287,45 @@ export default function GeoSculptorModule() {
                 </div>
             </div>
 
+            {/* LAYERS (City Mode Only) */}
+            {mode === 'VIEW' && isCityMode && (
+                <div className="pt-4 border-t border-zinc-800 space-y-3">
+                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Details</label>
+                    
+                    {/* Road Toggle */}
+                    <label className="flex items-center gap-3 cursor-pointer group select-none">
+                        <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${isRoadsEnabled ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
+                             {isRoadsEnabled && <ScanLine size={10} className="text-white" />}
+                        </div>
+                        <input 
+                            type="checkbox" 
+                            className="hidden" 
+                            checked={isRoadsEnabled} 
+                            onChange={(e) => setIsRoadsEnabled(e.target.checked)} 
+                        />
+                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors flex items-center gap-2">
+                            <Waypoints size={12} /> Show Roads
+                        </span>
+                    </label>
+
+                    {/* Water Toggle */}
+                    <label className="flex items-center gap-3 cursor-pointer group select-none">
+                        <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${isWaterEnabled ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
+                             {isWaterEnabled && <Waves size={10} className="text-white" />}
+                        </div>
+                        <input 
+                            type="checkbox" 
+                            className="hidden" 
+                            checked={isWaterEnabled} 
+                            onChange={(e) => setIsWaterEnabled(e.target.checked)} 
+                        />
+                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors flex items-center gap-2">
+                            <Waves size={12} /> Show Water
+                        </span>
+                    </label>
+                </div>
+            )}
+
             {/* SEARCH & CAPTURE */}
             {mode === 'SELECT' && (
                 <div className="space-y-4 pt-4 border-t border-zinc-800">
@@ -231,7 +343,7 @@ export default function GeoSculptorModule() {
                 </div>
             )}
 
-            {/* SLIDERS (VIEW MODE) */}
+            {/* SLIDERS (View Mode) */}
             <div className={`mt-6 ${mode === 'SELECT' ? 'hidden' : 'block'}`}>
                 <CyberSlider 
                   label="Vertical Scale" 
@@ -264,12 +376,12 @@ export default function GeoSculptorModule() {
         )}
       </ModuleLayout>
 
-      {/* 5. PAYMENT MODAL */}
+      {/* PAYMENT MODAL */}
       {showModal && (
         <PaymentModal 
             clientSecret={clientSecret} 
             onClose={closeModal} 
-            onSuccess={handleDownload} // <--- TRIGGERS DOWNLOAD ON SUCCESS
+            onSuccess={handleDownload} 
             color="cyan" 
             price="$1.99" 
         />

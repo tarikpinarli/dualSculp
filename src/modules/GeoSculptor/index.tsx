@@ -10,7 +10,7 @@ import {
     ScanLine, 
     Waypoints, 
     Waves,
-    Square // <--- NEW IMPORT
+    Square 
 } from 'lucide-react';
 import * as THREE from 'three';
 import { STLExporter } from 'three-stdlib';
@@ -30,37 +30,79 @@ import {
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
-// --- SIDEBAR SEARCH COMPONENT ---
+// --- SIDEBAR SEARCH COMPONENT (FIXED) ---
 const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => void }) => {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
+    
+    // Refs to handle click-outside and selection logic
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    const isSelectionRef = useRef(false);
 
+    // 1. Handle Click Outside to close dropdown
     useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    // 2. Search Effect
+    useEffect(() => {
+        // If we just selected an item from the list, DO NOT run a new search
+        if (isSelectionRef.current) {
+            isSelectionRef.current = false;
+            return;
+        }
+
         const timer = setTimeout(async () => {
-            if (query.length < 3) { setResults([]); return; }
+            if (query.length < 3) { 
+                setResults([]); 
+                setIsOpen(false);
+                return; 
+            }
+            
             setIsLoading(true);
             try {
                 const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&types=place,locality,neighborhood,poi&limit=5`;
                 const res = await fetch(endpoint);
                 const data = await res.json();
-                setResults(data.features || []);
-                setIsOpen(true);
-            } catch (e) { console.error(e); } finally { setIsLoading(false); }
+                
+                if (data.features && data.features.length > 0) {
+                    setResults(data.features);
+                    setIsOpen(true);
+                } else {
+                    setResults([]);
+                    setIsOpen(false);
+                }
+            } catch (e) { 
+                console.error(e); 
+            } finally { 
+                setIsLoading(false); 
+            }
         }, 500);
         return () => clearTimeout(timer);
     }, [query]);
 
     const handleSelect = (feature: any) => {
         const [lon, lat] = feature.center;
+        
+        // Mark this update as a selection so the useEffect doesn't trigger a re-search
+        isSelectionRef.current = true;
+        
         setQuery(feature.text);
-        setIsOpen(false);
+        setResults([]); // Clear results immediately
+        setIsOpen(false); // Close dropdown immediately
         onSelect(lat, lon);
     };
 
     return (
-        <div className="relative w-full z-50">
+        <div ref={wrapperRef} className="relative w-full z-50">
             <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     {isLoading ? <Loader2 size={12} className="text-cyan-400 animate-spin" /> : <Search size={12} className="text-zinc-500" />}
@@ -70,8 +112,13 @@ const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => v
                     className="block w-full pl-8 pr-3 py-2 text-[10px] font-mono bg-black/40 border border-zinc-700 text-zinc-200 rounded-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 placeholder-zinc-600 uppercase tracking-wide transition-all"
                     placeholder="Search Location..."
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onFocus={() => setIsOpen(true)}
+                    onChange={(e) => {
+                        setQuery(e.target.value);
+                        if(e.target.value.length >= 3) setIsOpen(true);
+                    }}
+                    onFocus={() => {
+                        if (results.length > 0) setIsOpen(true);
+                    }}
                 />
             </div>
             {isOpen && results.length > 0 && (
@@ -110,7 +157,7 @@ export default function GeoSculptorModule() {
   const [isCityMode, setIsCityMode] = useState(true); 
   const [isRoadsEnabled, setIsRoadsEnabled] = useState(false); 
   const [isWaterEnabled, setIsWaterEnabled] = useState(false); 
-  const [isBaseEnabled, setIsBaseEnabled] = useState(true); // <--- NEW STATE (Default True)
+  const [isBaseEnabled, setIsBaseEnabled] = useState(true); 
   const [exaggeration, setExaggeration] = useState(1.0); 
 
   // --- ACTIONS ---
@@ -123,7 +170,7 @@ export default function GeoSculptorModule() {
       // Reset toggles to default
       setIsRoadsEnabled(false);
       setIsWaterEnabled(false);
-      setIsBaseEnabled(true); // <--- Reset Base
+      setIsBaseEnabled(true); 
   };
 
   const triggerCapture = () => {
@@ -227,9 +274,7 @@ export default function GeoSculptorModule() {
     
     const group = new THREE.Group();
     
-    // UPDATE: Only export base if enabled
     if (isBaseEnabled && modelData.base) group.add(new THREE.Mesh(modelData.base));
-    
     if (modelData.buildings) group.add(new THREE.Mesh(modelData.buildings));
     if (modelData.roads) group.add(new THREE.Mesh(modelData.roads));
     if (modelData.water) group.add(new THREE.Mesh(modelData.water));
@@ -289,7 +334,7 @@ export default function GeoSculptorModule() {
                 <div className="pt-4 border-t border-zinc-800 space-y-3">
                     <label className="text-[9px] font-bold text-zinc-500 uppercase">Details</label>
                     
-                    {/* BASE TOGGLE (NEW) */}
+                    {/* BASE TOGGLE */}
                     <label className="flex items-center gap-3 cursor-pointer group select-none">
                         <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${isBaseEnabled ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
                              {isBaseEnabled && <Square size={10} className="text-white fill-white" />}
@@ -345,6 +390,7 @@ export default function GeoSculptorModule() {
                     <label className="text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-2">
                         <Search size={10} className="text-cyan-500"/> Search Target
                     </label>
+                    {/* UPDATED SEARCH COMPONENT */}
                     <SidebarSearch onSelect={(lat, lon) => mapRef.current?.flyTo(lat, lon)} />
                     
                     <button 
@@ -385,7 +431,7 @@ export default function GeoSculptorModule() {
                 modelData={modelData}
                 color="#e4e4e7"
                 isProcessing={isProcessing}
-                isBaseEnabled={isBaseEnabled} // <--- PASSING THE PROP
+                isBaseEnabled={isBaseEnabled} 
             />
         )}
       </ModuleLayout>

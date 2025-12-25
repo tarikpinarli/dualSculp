@@ -24,7 +24,7 @@ interface GeoViewProps {
   } | null;
   color: string;
   isProcessing: boolean;
-  isBaseEnabled: boolean; // <--- ADDED PROP
+  isBaseEnabled: boolean;
 }
 
 // --- UI Components ---
@@ -89,6 +89,7 @@ const CameraController = ({
         endPos.current.set(center.x, center.y + 500, center.z + 1); 
         break;
       case 'angle':
+        // Standard Isometric View (Diagonal)
         endPos.current.set(center.x + 300, center.y + 300, center.z + 300); 
         break;
       case 'low':
@@ -116,7 +117,6 @@ const CameraController = ({
     const smoothedT = easeInOutCubic(t);
 
     camera.position.lerpVectors(startPos.current, endPos.current, smoothedT);
-    
     orb.target.lerpVectors(startTarget.current, endTarget.current, smoothedT);
     
     camera.lookAt(orb.target);
@@ -140,12 +140,14 @@ const SceneContent = ({
   modelData, 
   color, 
   autoRotate,
-  isBaseEnabled // <--- ACCEPT PROP
+  isBaseEnabled 
 }: { modelData: any, color: string, autoRotate: boolean, isBaseEnabled: boolean }) => {
-  const VIBE_CYAN = "#ffffffff"; 
-  const VIBE_DARK_BASE = "#27272a"; 
-  const VIBE_ROAD = "#555555ff"; 
-  const VIBE_WATER = "#2467f7ff";
+  
+  // --- UPDATED PALETTE (Midnight Ceramic) ---
+  const VIBE_CYAN = "#ffffffff";      // Ceramic White (Zinc-200)
+  const VIBE_DARK_BASE = "#27272a"; // Graphite Base (Zinc-800)
+  const VIBE_ROAD = "555555ff";      // Matte Slate (Zinc-600)
+  const VIBE_WATER = "#2467f7ff";     // Electric Sapphire (Blue-600)
 
   return (
     <>
@@ -243,7 +245,7 @@ export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoVi
   return (
         <div 
         className="w-full h-full rounded-sm overflow-hidden shadow-2xl border border-white/10 relative group flex flex-col"
-        style={{ backgroundColor: "#18181b" }}
+        style={{ backgroundColor: "#18181b" }} // Gunmetal Background
         >      
       {/* 1. Empty / Processing Overlay State */}
       {(!modelData || isProcessing) && (
@@ -329,15 +331,19 @@ export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoVi
         </div>
       )}
 
-      {/* 4. Canvas */}
-      <Canvas dpr={[1, 1.5]} className="w-full h-full">
+      {/* 4. Canvas - UPDATED: Added Isometric Camera Position */}
+      <Canvas 
+          dpr={[1, 1.5]} 
+          className="w-full h-full"
+          camera={{ position: [150, 150, 150], fov: 45 }} // <--- FORCE ISOMETRIC START
+      >
           <CameraController viewMode={viewMode} setViewMode={setViewMode} />
           {modelData && (
              <SceneContent 
                 modelData={modelData} 
                 color={color} 
                 autoRotate={autoRotate} 
-                isBaseEnabled={isBaseEnabled} // <--- PASSING THE PROP
+                isBaseEnabled={isBaseEnabled} 
              />
           )}
       </Canvas>

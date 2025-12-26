@@ -31,8 +31,8 @@ const SHOWCASE_DATA = [
         title: "Binary Silhouette v1",
         stat: "Zero-Error Mesh",
         desc: "An optical illusion sculpture projecting two distinct shapes.",
-        image: "/showcase_page_images/shadow_sample.png", 
-        modelUrl: "/models/shadow_v1.glb", // Update this one once converted
+        image: "/showcase_page_images/dual.png", 
+        modelUrl: "/models/dual.glb", // Update this one once converted
         tags: ["Resin", "SLA"]
       }
     ]

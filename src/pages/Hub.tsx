@@ -74,10 +74,21 @@ export default function Hub() {
               {/* Video Preview Side - Adjusted height for mobile */}
               <div className="lg:w-1/3 h-48 sm:h-64 lg:h-auto relative overflow-hidden border-b lg:border-b-0 lg:border-r border-zinc-800">
                 <video 
-                  autoPlay loop muted playsInline 
-                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700 scale-105 group-hover:scale-100"
-                >
-                  <source src={mod.video} type="video/mp4" />
+                    autoPlay 
+                    loop 
+                    muted 
+                    playsInline 
+                    className="w-full h-full object-cover transition-all duration-700 
+                      /* Mobile State: Full color and brighter */
+                      grayscale-0 opacity-80 scale-100
+                      
+                      /* Desktop State: Grayscale and dimmed until hover */
+                      md:grayscale md:opacity-40 md:scale-105
+                      
+                      /* Desktop Hover State */
+                      md:group-hover:grayscale-0 md:group-hover:opacity-100 md:group-hover:scale-100"
+                  >
+                    <source src={mod.video} type="video/mp4" />
                 </video>
                 <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-zinc-950/20 to-transparent"></div>
                 <div className={`absolute bottom-4 left-4 flex items-center gap-2 text-${mod.color}-400`}>

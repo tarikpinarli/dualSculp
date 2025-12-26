@@ -222,7 +222,10 @@ export const fetchRoadsGeometry = async (
         });
 
         if (roadGeometries.length > 0) {
-            return BufferGeometryUtils.mergeGeometries(roadGeometries);
+            const merged = BufferGeometryUtils.mergeGeometries(roadGeometries);
+            // GARBAGE COLLECTION:
+            roadGeometries.forEach(g => g.dispose()); 
+            return merged;
         }
         return null;
 
@@ -312,7 +315,10 @@ export const fetchWaterGeometry = async (
         });
 
         if (waterGeometries.length > 0) {
-            return BufferGeometryUtils.mergeGeometries(waterGeometries);
+            const merged = BufferGeometryUtils.mergeGeometries(waterGeometries);
+            // GARBAGE COLLECTION:
+            waterGeometries.forEach(g => g.dispose()); 
+            return merged;
         }
         return null;
 
@@ -424,6 +430,8 @@ export const fetchBuildingsGeometry = async (
     if (buildingGeometries.length > 0) {
         try {
             finalBuildings = BufferGeometryUtils.mergeGeometries(buildingGeometries);
+            // GARBAGE COLLECTION:
+            buildingGeometries.forEach(g => g.dispose()); 
         } catch (e) {
             console.error("Merge failed", e);
         }

@@ -149,6 +149,19 @@ const SceneContent = ({
   const VIBE_ROAD = "555555ff";      // Matte Slate (Zinc-600)
   const VIBE_WATER = "#2467f7ff";     // Electric Sapphire (Blue-600)
 
+  // --- GARBAGE COLLECTION ---
+  // When this component unmounts or modelData changes, this cleans up the GPU memory.
+  useEffect(() => {
+    return () => {
+        if (modelData) {
+            if (modelData.base) modelData.base.dispose();
+            if (modelData.buildings) modelData.buildings.dispose();
+            if (modelData.roads) modelData.roads.dispose();
+            if (modelData.water) modelData.water.dispose();
+        }
+    };
+  }, [modelData]);
+
   return (
     <>
       <OrbitControls 
@@ -331,11 +344,11 @@ export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoVi
         </div>
       )}
 
-      {/* 4. Canvas - UPDATED: Added Isometric Camera Position */}
+      {/* 4. Canvas */}
       <Canvas 
           dpr={[1, 1.5]} 
           className="w-full h-full"
-          camera={{ position: [150, 150, 150], fov: 45 }} // <--- FORCE ISOMETRIC START
+          camera={{ position: [150, 150, 150], fov: 45 }} 
       >
           <CameraController viewMode={viewMode} setViewMode={setViewMode} />
           {modelData && (

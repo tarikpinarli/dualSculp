@@ -172,9 +172,24 @@ export default function Landing() {
                           className="group relative flex flex-col rounded-[2rem] overflow-hidden h-[450px] bg-zinc-900/30 border border-zinc-800/50 hover:border-cyan-500 transition-all active:scale-[0.98] md:active:scale-100"
                         >
                             <div className="relative h-[55%] w-full bg-zinc-950 overflow-hidden border-b border-white/5">
-                                <video autoPlay loop muted playsInline className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700 opacity-40 group-hover:opacity-100 scale-110 group-hover:scale-100">
-                                  <source src={mod.videoOverlay} type="video/mp4" />
-                                </video>
+                                <video 
+                                autoPlay 
+                                loop 
+                                muted 
+                                playsInline 
+                                className="w-full h-full object-cover transition-all duration-700 
+                                  grayscale-0           /* Default to color (Mobile) */
+                                  md:grayscale          /* Black and white only on Desktop */
+                                  md:group-hover:grayscale-0 /* Color on Desktop hover */
+                                  opacity-100           /* Default to visible (Mobile) */
+                                  md:opacity-40         /* Dimmer on Desktop */
+                                  md:group-hover:opacity-100 /* Bright on Desktop hover */
+                                  scale-100             /* Standard scale (Mobile) */
+                                  md:scale-110          /* Zoomed on Desktop */
+                                  md:group-hover:scale-100 /* Zoom out on Desktop hover */"
+                              >
+                                <source src={mod.videoOverlay} type="video/mp4" />
+                              </video>
                                 <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 to-transparent opacity-60"></div>
                             </div>
                             <div className="p-8 h-[45%] flex flex-col justify-between group-hover:bg-cyan-500/5 transition-colors">

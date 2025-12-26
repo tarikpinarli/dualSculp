@@ -21,7 +21,7 @@ import { GeoView } from './GeoView';
 import { MapSelector, MapSelectorRef } from './MapSelector';
 
 // --- IMPORTS ---
-import { fetchBuildingsGeometry } from '../../utils/geo/geoEngine';
+import { fetchBuildingsGeometry } from '../../utils/geo/fetchBuilding';
 import { fetchTerrainGeometry } from '../../utils/geo/fetchTerrain';
 import { fetchRoadsGeometry } from '../../utils/geo/fetchRoads';
 

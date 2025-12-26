@@ -4,7 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
-const MAX_RADIUS_KM = 5; // The "Safe" limit
+const MAX_RADIUS_KM = 2; // Reduced slightly to encourage detailed meshes
 
 // Helper: Distance Calc
 const getDistanceKM = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -47,8 +47,10 @@ export const MapSelector = forwardRef<MapSelectorRef, {}>((props, ref) => {
               return null; // Block the action
           }
 
-          const diagonal = Math.sqrt(Math.pow(boxDimensions.width, 2) + Math.pow(boxDimensions.height, 2));
-          const radiusKM = (diagonal / 2) / 1000;
+          // FIX: Use Half-Width (Center to Edge) instead of Diagonal (Center to Corner)
+          // This ensures the box edges match the 3D scene edges exactly.
+          const maxDim = Math.max(boxDimensions.width, boxDimensions.height);
+          const radiusKM = (maxDim / 2) / 1000;
           
           return {
               lat: viewState.latitude,
@@ -88,9 +90,9 @@ export const MapSelector = forwardRef<MapSelectorRef, {}>((props, ref) => {
 
       setBoxDimensions({ width: widthMeters, height: heightMeters });
 
-      // Check Limits
-      const diagonal = Math.sqrt(Math.pow(widthMeters, 2) + Math.pow(heightMeters, 2));
-      const currentRadiusKM = (diagonal / 2) / 1000;
+      // Check Limits using correct math
+      const maxDim = Math.max(widthMeters, heightMeters);
+      const currentRadiusKM = (maxDim / 2) / 1000;
       setIsOutOfRange(currentRadiusKM > MAX_RADIUS_KM);
   };
 
@@ -112,7 +114,7 @@ export const MapSelector = forwardRef<MapSelectorRef, {}>((props, ref) => {
             mapboxAccessToken={MAPBOX_TOKEN}
             
             // --- UPDATED ZOOM LIMITS ---
-            maxZoom={26} // Unlocked extreme zoom (was ~20)
+            maxZoom={26} // Unlocked extreme zoom
             minZoom={4}  // Prevent zooming out to space
             // ---------------------------
             

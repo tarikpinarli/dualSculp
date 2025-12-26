@@ -402,18 +402,6 @@ export default function GeoSculptorModule() {
                 </div>
             )}
 
-            {/* SLIDERS (View Mode) */}
-            <div className={`mt-6 ${mode === 'SELECT' ? 'hidden' : 'block'}`}>
-                <CyberSlider 
-                  label="Vertical Scale" 
-                  icon={isCityMode ? Building2 : Mountain} 
-                  value={exaggeration} 
-                  onChange={setExaggeration} 
-                  min={0.5} max={3} step={0.1} unit="x" color="cyan"
-                  tooltip="Exaggerate terrain height for better 3D printing results."
-                />
-            </div>
-
             {/* STATUS DISPLAY */}
             {isProcessing && (
                 <div className="p-4 bg-cyan-950/30 border border-cyan-500/30 rounded-sm mt-8 flex flex-col items-center justify-center animate-pulse">

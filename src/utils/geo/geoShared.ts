@@ -37,6 +37,18 @@ export const ensureCCW = (ring: [number, number][]) => {
     return ring;
 };
 
+// Strict closer to prevent polygon-clipping crashes
+export const closeRing = (ring: [number, number][]) => {
+    if (ring.length < 3) return ring;
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    // If endpoints are not exactly the same, push first point to end
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+        ring.push([first[0], first[1]]);
+    }
+    return ring;
+};
+
 // --- CLIPPING UTILS (For Roads) ---
 const BOX_LIMIT = 50; 
 

@@ -146,8 +146,8 @@ const SceneContent = ({
   // --- UPDATED PALETTE (Midnight Ceramic) ---
   const VIBE_CYAN = "#ffffffff";      // Ceramic White (Zinc-200)
   const VIBE_DARK_BASE = "#27272a"; // Graphite Base (Zinc-800)
-  const VIBE_ROAD = "555555ff";      // Matte Slate (Zinc-600)
-  const VIBE_WATER = "#2467f7ff";     // Electric Sapphire (Blue-600)
+  const VIBE_ROAD = "#ada5a5ff";      // Matte Slate (Zinc-600)
+  const VIBE_WATER = "#2467f7";     // Electric Sapphire (Blue-600)
 
   // --- GARBAGE COLLECTION ---
   // When this component unmounts or modelData changes, this cleans up the GPU memory.
@@ -211,10 +211,12 @@ const SceneContent = ({
                     <mesh geometry={modelData.water}>
                         <meshStandardMaterial 
                             color={VIBE_WATER} 
-                            roughness={0.1} 
-                            metalness={0.8} 
+                            roughness={0.2} 
+                            metalness={0.6} 
                             emissive={VIBE_WATER}
-                            emissiveIntensity={0.2}
+                            emissiveIntensity={0.15}
+                            transparent={true}
+                            opacity={0.95}
                             side={THREE.DoubleSide} 
                         />
                     </mesh>

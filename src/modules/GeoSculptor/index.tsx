@@ -1,23 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-    Mountain, 
-    RotateCcw, 
-    Building2, 
-    Globe, 
-    Loader2, 
-    Search, 
-    MapPin, 
-    ScanLine, 
-    Waypoints, 
-    Waves,
-    Square,
-    AlertTriangle
+    RotateCcw, Building2, Globe, Loader2, Search, MapPin, ScanLine, 
+    Waypoints, Square, AlertTriangle, Mountain
 } from 'lucide-react';
 import * as THREE from 'three';
 import { STLExporter } from 'three-stdlib';
 
 import { ModuleLayout } from '../../components/layout/ModuleLayout';
-import { CyberSlider } from '../../components/ui/CyberSlider';
 import { PaymentModal } from '../../components/PaymentModal';
 import { usePayment } from '../../hooks/usePayment';
 import { GeoView } from './GeoView';
@@ -25,8 +14,7 @@ import { MapSelector, MapSelectorRef } from './MapSelector';
 import { 
     fetchTerrainGeometry, 
     fetchBuildingsGeometry, 
-    fetchRoadsGeometry, 
-    fetchWaterGeometry 
+    fetchRoadsGeometry
 } from '../../utils/geoEngine';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
@@ -38,45 +26,17 @@ const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => v
     const [isLoading, setIsLoading] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
     
-    const wrapperRef = useRef<HTMLDivElement>(null);
-    const isSelectionRef = useRef(false);
-
+    // Debounce search input
     useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
-
-    useEffect(() => {
-        if (isSelectionRef.current) {
-            isSelectionRef.current = false;
-            return;
-        }
-
         const timer = setTimeout(async () => {
-            if (query.length < 3) { 
-                setResults([]); 
-                setIsOpen(false);
-                return; 
-            }
-            
+            if (query.length < 3) return;
             setIsLoading(true);
             try {
-                const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&types=place,locality,neighborhood,poi&limit=5`;
+                const endpoint = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&types=place,locality&limit=5`;
                 const res = await fetch(endpoint);
                 const data = await res.json();
-                
-                if (data.features && data.features.length > 0) {
-                    setResults(data.features);
-                    setIsOpen(true);
-                } else {
-                    setResults([]);
-                    setIsOpen(false);
-                }
+                setResults(data.features || []);
+                setIsOpen(true);
             } catch (e) { 
                 console.error(e); 
             } finally { 
@@ -86,17 +46,8 @@ const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => v
         return () => clearTimeout(timer);
     }, [query]);
 
-    const handleSelect = (feature: any) => {
-        const [lon, lat] = feature.center;
-        isSelectionRef.current = true;
-        setQuery(feature.text);
-        setResults([]);
-        setIsOpen(false);
-        onSelect(lat, lon);
-    };
-
     return (
-        <div ref={wrapperRef} className="relative w-full z-50">
+        <div className="relative w-full z-50">
             <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     {isLoading ? <Loader2 size={12} className="text-cyan-400 animate-spin" /> : <Search size={12} className="text-zinc-500" />}
@@ -106,19 +57,17 @@ const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => v
                     className="block w-full pl-8 pr-3 py-2 text-[10px] font-mono bg-black/40 border border-zinc-700 text-zinc-200 rounded-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 placeholder-zinc-600 uppercase tracking-wide transition-all"
                     placeholder="Search Location..."
                     value={query}
-                    onChange={(e) => {
-                        setQuery(e.target.value);
-                        if(e.target.value.length >= 3) setIsOpen(true);
-                    }}
-                    onFocus={() => {
-                        if (results.length > 0) setIsOpen(true);
-                    }}
+                    onChange={(e) => setQuery(e.target.value)}
                 />
             </div>
             {isOpen && results.length > 0 && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-zinc-900 border border-zinc-700 rounded-sm shadow-xl max-h-48 overflow-y-auto z-50">
                     {results.map((place) => (
-                        <button key={place.id} onClick={() => handleSelect(place)} className="w-full text-left px-3 py-2 text-[10px] text-zinc-400 hover:bg-cyan-900/30 hover:text-cyan-200 border-b border-white/5 last:border-0 flex items-center gap-2 transition-colors">
+                        <button 
+                            key={place.id} 
+                            onClick={() => { onSelect(place.center[1], place.center[0]); setIsOpen(false); }} 
+                            className="w-full text-left px-3 py-2 text-[10px] text-zinc-400 hover:bg-cyan-900/30 hover:text-cyan-200 border-b border-white/5 last:border-0 flex items-center gap-2 transition-colors"
+                        >
                             <MapPin size={10} /> <span className="truncate">{place.place_name}</span>
                         </button>
                     ))}
@@ -128,6 +77,7 @@ const SidebarSearch = ({ onSelect }: { onSelect: (lat: number, lon: number) => v
     );
 };
 
+// --- MAIN MODULE ---
 export default function GeoSculptorModule() {
   const { showModal, clientSecret, startCheckout, closeModal } = usePayment('geo-sculptor-basic');
   const mapRef = useRef<MapSelectorRef>(null);
@@ -135,122 +85,103 @@ export default function GeoSculptorModule() {
   // --- STATE ---
   const [mode, setMode] = useState<'SELECT' | 'VIEW'>('SELECT');
   
-  // Model Data
+  // 3D Geometry State
   const [modelData, setModelData] = useState<{ 
       buildings: THREE.BufferGeometry | null, 
       base: THREE.BufferGeometry, 
-      roads?: THREE.BufferGeometry | null,
-      water?: THREE.BufferGeometry | null 
+      roads?: THREE.BufferGeometry | null
   } | null>(null);
   
+  // UI State
   const [status, setStatus] = useState<string>(""); 
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [coords, setCoords] = useState<{lat: number, lon: number, zoom: number, radius: number} | null>(null);
   
-  // Params
-  const [isCityMode, setIsCityMode] = useState(true); 
-  const [isRoadsEnabled, setIsRoadsEnabled] = useState(false); 
-  const [isWaterEnabled, setIsWaterEnabled] = useState(false); 
+  // Generation Settings
+  const [showBuildings, setShowBuildings] = useState(true); 
+  const [showRoads, setShowRoads] = useState(false); 
+  const [projectOnTerrain, setProjectOnTerrain] = useState(true); 
   const [isBaseEnabled, setIsBaseEnabled] = useState(true); 
-  const [exaggeration, setExaggeration] = useState(1.0); 
 
   // --- ACTIONS ---
 
-  // 1. RESET Logic
   const handleReset = () => {
       setMode('SELECT');
       setModelData(null);
       setCoords(null);
       setError(null);
-      // Reset toggles to default
-      setIsRoadsEnabled(false);
-      setIsWaterEnabled(false);
-      setIsBaseEnabled(true); 
   };
 
   const triggerCapture = () => {
       if (mapRef.current) {
           const selection = mapRef.current.getSelection();
           if (selection) {
-              handleMapConfirm(selection);
+              setCoords(selection);
+              setMode('VIEW');
+              // Trigger generation immediately upon capture
+              generateModel(selection);
           }
       }
   };
 
-  const handleMapConfirm = async (selectedCoords: { lat: number, lon: number, zoom: number, radius: number }) => {
-      setCoords(selectedCoords);
-      setModelData(null); 
-      setError(null);
-      setMode('VIEW');
-      generateModel(selectedCoords, isCityMode, isRoadsEnabled, isWaterEnabled, exaggeration, true);
-  };
-
-  // Main Generator Logic
+  /**
+   * Main Generator Logic
+   * 1. Fetches Terrain (Crucial: provides HeightSampler)
+   * 2. Uses Sampler to fetch Buildings (sets them on ground)
+   * 3. Uses Sampler to fetch Roads (drapes them on ground)
+   */
   const generateModel = async (
-      c: {lat:number, lon:number, radius: number}, 
-      cityMode: boolean,
-      roadsEnabled: boolean,
-      waterEnabled: boolean,
-      exagg: number,
-      forceFresh: boolean = false
+      c: {lat:number, lon:number, radius: number}
   ) => {
+      if (isProcessing) return; // Prevent double clicks
       setIsProcessing(true);
       setError(null);
-      if (forceFresh) setModelData(null); 
-      setStatus("Processing Data...");
-
+      
+      // Clear previous model to show loading state
+      setModelData(null); 
+      
       try {
-          let currentBuildings = (forceFresh) ? null : (modelData?.buildings || null);
-          let currentBase = (forceFresh) ? null : (modelData?.base || null);
-          let currentRoads = (forceFresh) ? null : (modelData?.roads || null);
-          let currentWater = (forceFresh) ? null : (modelData?.water || null);
+          // STEP 1: Terrain & Sampler
+          setStatus("Generating Topography...");
+          const terrainData = await fetchTerrainGeometry(c.lat, c.lon, c.radius, 13);
+          
+          let buildings = null;
+          let roads = null;
 
-          const needsFreshGeo = !currentBase || (cityMode && !currentBuildings && !forceFresh) || (!cityMode && !currentBase && !forceFresh) || forceFresh;
-
-          if (needsFreshGeo) {
-              if (cityMode) {
-                 const res = await fetchBuildingsGeometry(c.lat, c.lon, c.radius, setStatus);
-                 currentBuildings = res.buildings;
-                 currentBase = res.base;
-              } else {
-                 setStatus("Fetching Digital Elevation Model...");
-                 const res = await fetchTerrainGeometry(c.lat, c.lon, 12, exagg);
-                 currentBuildings = res.buildings; 
-                 currentBase = res.base;
-              }
+          // STEP 2: Buildings
+          if (showBuildings) {
+              setStatus("Constructing Buildings...");
+              buildings = await fetchBuildingsGeometry(
+                  c.lat, 
+                  c.lon, 
+                  c.radius, 
+                  projectOnTerrain, 
+                  terrainData.sampler, // Pass sampler to fix "buried" buildings
+                  setStatus
+              );
           }
 
-          if (roadsEnabled && cityMode) {
-              if (!currentRoads || forceFresh) {
-                 setStatus("Tracing Highway Network...");
-                 const roadGeom = await fetchRoadsGeometry(c.lat, c.lon, c.radius);
-                 currentRoads = roadGeom;
-              }
-          } else {
-              currentRoads = null; 
-          }
-
-          if (waterEnabled && cityMode) {
-              if (!currentWater || forceFresh) {
-                 setStatus("Mapping Water Bodies...");
-                 const waterGeom = await fetchWaterGeometry(c.lat, c.lon, c.radius);
-                 currentWater = waterGeom;
-              }
-          } else {
-              currentWater = null;
+          // STEP 3: Roads
+          if (showRoads) {
+              setStatus("Tracing Highway Network...");
+              roads = await fetchRoadsGeometry(
+                  c.lat, 
+                  c.lon, 
+                  c.radius,
+                  terrainData.sampler // Pass sampler to fix "roads under terrain"
+              );
           }
 
           setModelData({
-              buildings: currentBuildings,
-              base: currentBase!,
-              roads: currentRoads,
-              water: currentWater
+              base: terrainData.geometry,
+              buildings: buildings,
+              roads: roads
           });
 
       } catch(e: any) {
           console.error(e);
-          setError(e.message || "An error occurred");
+          setError("Failed to generate model. The area might be too complex or the server is busy.");
           setModelData(null);
       } finally {
           setIsProcessing(false);
@@ -258,28 +189,38 @@ export default function GeoSculptorModule() {
       }
   };
 
-  // Re-generate on Param Change
+  // Auto-regenerate when toggles change (only if we have active coordinates)
   useEffect(() => {
      if (mode === 'VIEW' && coords && !error) {
-         const timer = setTimeout(() => generateModel(coords, isCityMode, isRoadsEnabled, isWaterEnabled, exaggeration, false), 500);
+         const timer = setTimeout(() => {
+             generateModel(coords);
+         }, 800); // 800ms debounce
          return () => clearTimeout(timer);
      }
-  }, [exaggeration, isCityMode, isRoadsEnabled, isWaterEnabled]); 
+  }, [showBuildings, showRoads, projectOnTerrain]); 
 
-  // --- 2. EXPORT LOGIC ---
+  // --- EXPORT TO STL ---
   const handleDownload = () => {
     if (!modelData) return;
     
     const group = new THREE.Group();
     
-    if (isBaseEnabled && modelData.base) group.add(new THREE.Mesh(modelData.base));
-    if (modelData.buildings) group.add(new THREE.Mesh(modelData.buildings));
-    if (modelData.roads) group.add(new THREE.Mesh(modelData.roads));
-    if (modelData.water) group.add(new THREE.Mesh(modelData.water));
-
+    // Combine visible meshes for export
+    if (isBaseEnabled && modelData.base) {
+        const mesh = new THREE.Mesh(modelData.base);
+        group.add(mesh);
+    }
+    if (modelData.buildings) {
+        const mesh = new THREE.Mesh(modelData.buildings);
+        group.add(mesh);
+    }
+    if (modelData.roads) {
+        const mesh = new THREE.Mesh(modelData.roads);
+        group.add(mesh);
+    }
+    
     const exporter = new STLExporter();
     const result = exporter.parse(group);
-    
     const blob = new Blob([result], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -301,6 +242,7 @@ export default function GeoSculptorModule() {
         sidebar={
           <div className="space-y-6">
             
+            {/* RESET BUTTON */}
             {mode === 'VIEW' && (
                 <button 
                     onClick={handleReset}
@@ -312,92 +254,67 @@ export default function GeoSculptorModule() {
 
             <div className="h-px bg-zinc-800 my-4"></div>
 
-            {/* RENDER MODE */}
-            <div className={`space-y-2 ${mode === 'SELECT' ? '' : 'opacity-50 pointer-events-none'}`}>
-                <label className="text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-2">
-                    <Globe size={10} className="text-cyan-500"/> Render Mode
-                </label>
-                <div className="flex gap-2">
-                    <button onClick={() => setIsCityMode(false)} className={`flex-1 py-3 text-[9px] font-bold uppercase border rounded-sm transition-all ${!isCityMode ? 'bg-cyan-950/40 border-cyan-500 text-cyan-100' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-                        <Mountain size={16} className="mx-auto mb-1" /> Terrain
-                    </button>
-                    <button onClick={() => setIsCityMode(true)} className={`flex-1 py-3 text-[9px] font-bold uppercase border rounded-sm transition-all ${isCityMode ? 'bg-cyan-950/40 border-cyan-500 text-cyan-100' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-                        <Building2 size={16} className="mx-auto mb-1" /> City Block
-                    </button>
-                </div>
-            </div>
-
-            {/* ERROR DISPLAY */}
+            {/* ERROR MESSAGE */}
             {error && (
-                <div className="p-3 bg-red-950/30 border border-red-500/50 rounded-sm">
+                <div className="p-3 bg-red-950/30 border border-red-500/50 rounded-sm animate-pulse">
                     <div className="flex items-start gap-3">
                         <AlertTriangle size={16} className="text-red-500 mt-0.5 shrink-0" />
-                        <div className="space-y-1">
-                            <p className="text-[10px] font-bold text-red-200 uppercase">{error}</p>
-                            <p className="text-[9px] text-red-300/70 leading-relaxed">
-                                Zoom in to reduce the number of buildings and try again.
-                            </p>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-red-200 uppercase">Generation Error</span>
+                            <span className="text-[9px] text-red-300/70">{error}</span>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* LAYERS (City Mode Only) - Hide if error */}
-            {mode === 'VIEW' && isCityMode && !error && (
-                <div className="pt-4 border-t border-zinc-800 space-y-3">
-                    <label className="text-[9px] font-bold text-zinc-500 uppercase">Details</label>
-                    
-                    {/* BASE TOGGLE */}
+            {/* CONTROLS (View Mode Only) */}
+            {mode === 'VIEW' && !error && (
+                <div className="space-y-4">
+                    <label className="text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-2">
+                        <Globe size={10} className="text-cyan-500"/> Layer Controls
+                    </label>
+
+                    {/* Show Base/Terrain */}
                     <label className="flex items-center gap-3 cursor-pointer group select-none">
                         <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${isBaseEnabled ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
                              {isBaseEnabled && <Square size={10} className="text-white fill-white" />}
                         </div>
-                        <input 
-                            type="checkbox" 
-                            className="hidden" 
-                            checked={isBaseEnabled} 
-                            onChange={(e) => setIsBaseEnabled(e.target.checked)} 
-                        />
-                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors flex items-center gap-2">
-                            <Square size={12} /> Base Plate
-                        </span>
+                        <input type="checkbox" className="hidden" checked={isBaseEnabled} onChange={(e) => setIsBaseEnabled(e.target.checked)} />
+                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors">Terrain Base</span>
                     </label>
 
-                    {/* Road Toggle */}
+                    {/* Show Buildings */}
                     <label className="flex items-center gap-3 cursor-pointer group select-none">
-                        <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${isRoadsEnabled ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
-                             {isRoadsEnabled && <ScanLine size={10} className="text-white" />}
+                        <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${showBuildings ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
+                             {showBuildings && <Building2 size={10} className="text-white" />}
                         </div>
-                        <input 
-                            type="checkbox" 
-                            className="hidden" 
-                            checked={isRoadsEnabled} 
-                            onChange={(e) => setIsRoadsEnabled(e.target.checked)} 
-                        />
-                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors flex items-center gap-2">
-                            <Waypoints size={12} /> Show Roads
-                        </span>
+                        <input type="checkbox" className="hidden" checked={showBuildings} onChange={(e) => setShowBuildings(e.target.checked)} />
+                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors">Generate Buildings</span>
                     </label>
 
-                    {/* Water Toggle */}
+                    {/* Sub-Option: Project on Terrain (Only if buildings active) */}
+                    <div className={`ml-7 transition-all duration-300 ease-in-out ${showBuildings ? 'opacity-100 max-h-10' : 'opacity-0 max-h-0 overflow-hidden'}`}>
+                         <label className="flex items-center gap-2 cursor-pointer group select-none">
+                            <div className={`w-3 h-3 border flex items-center justify-center rounded-sm ${projectOnTerrain ? 'bg-zinc-700 border-zinc-500' : 'bg-transparent border-zinc-800'}`}>
+                                {projectOnTerrain && <Mountain size={8} className="text-white" />}
+                            </div>
+                            <input type="checkbox" className="hidden" checked={projectOnTerrain} onChange={(e) => setProjectOnTerrain(e.target.checked)} />
+                            <span className="text-[9px] text-zinc-500 group-hover:text-zinc-300">Drape on Terrain</span>
+                         </label>
+                    </div>
+
+                    {/* Show Roads */}
                     <label className="flex items-center gap-3 cursor-pointer group select-none">
-                        <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${isWaterEnabled ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
-                             {isWaterEnabled && <Waves size={10} className="text-white" />}
+                        <div className={`w-4 h-4 border flex items-center justify-center rounded-sm transition-colors ${showRoads ? 'bg-cyan-600 border-cyan-500' : 'bg-zinc-900 border-zinc-700 group-hover:border-zinc-500'}`}>
+                             {showRoads && <Waypoints size={10} className="text-white" />}
                         </div>
-                        <input 
-                            type="checkbox" 
-                            className="hidden" 
-                            checked={isWaterEnabled} 
-                            onChange={(e) => setIsWaterEnabled(e.target.checked)} 
-                        />
-                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors flex items-center gap-2">
-                            <Waves size={12} /> Show Water
-                        </span>
+                        <input type="checkbox" className="hidden" checked={showRoads} onChange={(e) => setShowRoads(e.target.checked)} />
+                        <span className="text-[10px] font-bold uppercase text-zinc-400 group-hover:text-zinc-200 transition-colors">Trace Roads</span>
                     </label>
                 </div>
             )}
 
-            {/* SEARCH & CAPTURE */}
+            {/* SEARCH & CAPTURE (Select Mode) */}
             {mode === 'SELECT' && (
                 <div className="space-y-4 pt-4 border-t border-zinc-800">
                     <label className="text-[9px] font-bold text-zinc-500 uppercase flex items-center gap-2">
@@ -412,23 +329,12 @@ export default function GeoSculptorModule() {
                     >
                         <ScanLine size={16} /> Capture Area
                     </button>
-                    <p className="text-[9px] text-zinc-500 text-center px-4">
-                        Zoom in to reduce building count for better performance.
+                    
+                    <p className="text-[9px] text-zinc-500 text-center px-4 leading-relaxed">
+                        Data is projected using Web Mercator (EPSG:3857) to ensure perfect alignment between buildings and terrain features.
                     </p>
                 </div>
             )}
-
-            {/* SLIDERS (View Mode) */}
-            <div className={`mt-6 ${mode === 'SELECT' || error ? 'hidden' : 'block'}`}>
-                <CyberSlider 
-                  label="Vertical Scale" 
-                  icon={isCityMode ? Building2 : Mountain} 
-                  value={exaggeration} 
-                  onChange={setExaggeration} 
-                  min={0.5} max={3} step={0.1} unit="x" color="cyan"
-                  tooltip="Exaggerate terrain height for better 3D printing results."
-                />
-            </div>
 
             {/* STATUS DISPLAY */}
             {isProcessing && (

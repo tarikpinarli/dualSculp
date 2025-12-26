@@ -3,103 +3,29 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import polygonClipping from 'polygon-clipping';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
+const EARTH_RADIUS = 6378137;
 
-// --- 1. GEOMETRY HELPERS ---
+// --- 1. PROJECTION MATH (Web Mercator EPSG:3857) ---
 
-const cleanAndStandardize = (geom: THREE.BufferGeometry) => {
-    let cleanGeom = geom.index ? geom.toNonIndexed() : geom;
-    if (cleanGeom.attributes.uv) cleanGeom.deleteAttribute('uv');
-    if (cleanGeom.attributes.color) cleanGeom.deleteAttribute('color');
-    cleanGeom.computeVertexNormals();
-    return cleanGeom;
-};
-
-// Forces polygon points to be Counter-Clockwise.
-const ensureCCW = (ring: [number, number][]) => {
-    let sum = 0;
-    for (let i = 0; i < ring.length - 1; i++) {
-        sum += (ring[i+1][0] - ring[i][0]) * (ring[i+1][1] + ring[i][1]);
-    }
-    if (sum > 0) return ring.reverse();
-    return ring;
-};
-
-// --- 2. CLIPPING UTILS ---
-const BOX_LIMIT = 50; 
-
-const isInside = (p: THREE.Vector3) => {
-    return Math.abs(p.x) <= BOX_LIMIT && Math.abs(p.z) <= BOX_LIMIT;
-};
-
-// Finds intersection of segment AB with the box boundary
-const intersectBox = (A: THREE.Vector3, B: THREE.Vector3): THREE.Vector3 | null => {
-    const limits = [-BOX_LIMIT, BOX_LIMIT];
-    let tMin = 0, tMax = 1;
-    const dx = B.x - A.x;
-    const dz = B.z - A.z;
-    const p = [-dx, dx, -dz, dz];
-    const q = [A.x - (-BOX_LIMIT), BOX_LIMIT - A.x, A.z - (-BOX_LIMIT), BOX_LIMIT - A.z];
-
-    for (let i = 0; i < 4; i++) {
-        if (p[i] === 0) {
-            if (q[i] < 0) return null; // Parallel and outside
-        } else {
-            const t = q[i] / p[i];
-            if (p[i] < 0) {
-                if (t > tMax) return null;
-                if (t > tMin) tMin = t;
-            } else {
-                if (t < tMin) return null;
-                if (t < tMax) tMax = t;
-            }
-        }
-    }
-
-    if (tMin > tMax) return null;
-    
-    return new THREE.Vector3(A.x + tMin * dx, A.y, A.z + tMin * dz);
-};
-
-const clipRoadPath = (points: THREE.Vector3[]): THREE.Vector3[][] => {
-    const segments: THREE.Vector3[][] = [];
-    let currentSegment: THREE.Vector3[] = [];
-
-    for (let i = 0; i < points.length - 1; i++) {
-        const A = points[i];
-        const B = points[i+1];
-        const A_in = isInside(A);
-        const B_in = isInside(B);
-
-        if (A_in && B_in) {
-            if (currentSegment.length === 0) currentSegment.push(A);
-            currentSegment.push(B);
-        } else if (A_in && !B_in) {
-            const I = intersectBox(A, B);
-            if (currentSegment.length === 0) currentSegment.push(A);
-            if (I) currentSegment.push(I);
-            segments.push(currentSegment);
-            currentSegment = [];
-        } else if (!A_in && B_in) {
-            const I = intersectBox(A, B);
-            if (I) {
-                currentSegment.push(I);
-                currentSegment.push(B);
-            }
-        }
-    }
-    
-    if (currentSegment.length > 1) segments.push(currentSegment);
-    return segments;
-};
-
-// --- UTILS ---
-const latLonToMeters = (lat: number, lon: number, centerLat: number, centerLon: number) => {
-  const R = 6378137; 
-  const dLat = (lat - centerLat) * Math.PI / 180;
-  const dLon = (lon - centerLon) * Math.PI / 180;
-  const x = dLon * Math.cos(centerLat * Math.PI / 180) * R;
-  const y = dLat * R;
+// Converts Lat/Lon to Web Mercator Meters
+export const projectToMercator = (lat: number, lon: number) => {
+  const x = EARTH_RADIUS * (lon * Math.PI / 180);
+  const latRad = Math.max(-85.051129, Math.min(85.051129, lat)) * Math.PI / 180;
+  const y = EARTH_RADIUS * Math.log(Math.tan(Math.PI / 4 + latRad / 2));
   return { x, y };
+};
+
+const getTileBounds = (tx: number, ty: number, zoom: number) => {
+  const numTiles = Math.pow(2, zoom);
+  const worldSize = 2 * Math.PI * EARTH_RADIUS;
+  const tileSizeMeters = worldSize / numTiles;
+
+  const minX = (tx * tileSizeMeters) - (worldSize / 2);
+  const maxY = (worldSize / 2) - (ty * tileSizeMeters); // Top Y (North)
+  const minY = maxY - tileSizeMeters;                  // Bottom Y (South)
+  const maxX = minX + tileSizeMeters;
+
+  return { minX, maxX, minY, maxY, tileSizeMeters };
 };
 
 const getTileCoords = (lat: number, lon: number, zoom: number) => {
@@ -110,16 +36,50 @@ const getTileCoords = (lat: number, lon: number, zoom: number) => {
   return { x, y };
 };
 
-// --- TERRAIN FETCH ---
-export const fetchTerrainGeometry = async (lat: number, lon: number, zoom: number = 12, exaggeration: number = 1) => {
+// --- 2. GEOMETRY HELPERS ---
+
+const cleanAndStandardize = (geom: THREE.BufferGeometry) => {
+  if (geom.attributes.uv) geom.deleteAttribute('uv');
+  if (geom.attributes.color) geom.deleteAttribute('color');
+  geom.computeVertexNormals();
+  return geom;
+};
+
+const ensureCCW = (ring: [number, number][]) => {
+  let sum = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    sum += (ring[i + 1][0] - ring[i][0]) * (ring[i + 1][1] + ring[i][1]);
+  }
+  return sum > 0 ? ring.reverse() : ring;
+};
+
+// --- 3. TERRAIN FETCH (Solid Block for 3D Printing) ---
+
+export interface HeightSampler {
+  getHeight: (mercX: number, mercY: number) => number;
+}
+
+export const fetchTerrainGeometry = async (
+  lat: number, 
+  lon: number, 
+  radiusKM: number,
+  zoom: number = 13
+) => {
   const { x, y } = getTileCoords(lat, lon, zoom);
+  const center = projectToMercator(lat, lon); 
+  const bounds = getTileBounds(x, y, zoom);
+
   const url = `https://api.mapbox.com/v4/mapbox.terrain-rgb/${zoom}/${x}/${y}.pngraw?access_token=${MAPBOX_TOKEN}`;
   
   const img = new Image();
   img.crossOrigin = "Anonymous";
   img.src = url;
 
-  return new Promise<{ buildings: THREE.BufferGeometry, base: THREE.BufferGeometry }>((resolve, reject) => {
+  return new Promise<{ 
+    geometry: THREE.BufferGeometry, 
+    base: THREE.BufferGeometry, 
+    sampler: HeightSampler 
+  }>((resolve, reject) => {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
@@ -129,310 +89,396 @@ export const fetchTerrainGeometry = async (lat: number, lon: number, zoom: numbe
       ctx.drawImage(img, 0, 0);
       const data = ctx.getImageData(0, 0, img.width, img.height).data;
 
-      const geometry = new THREE.PlaneGeometry(100, 100, 255, 255);
-      const positions = geometry.attributes.position;
+      // Grid Config - Corrected to exactly 2x radius (1 unit radius each side)
+      const sizeMeters = radiusKM * 1000 * 2;
+      const segments = 128;
+      const gridSize = segments + 1;
+      const halfSize = sizeMeters / 2;
       
-      let minHeight = Infinity;
-      const rawHeights: number[] = [];
+      const topVertices: number[] = [];
+      const bottomVertices: number[] = [];
+      const indices: number[] = [];
+      let minH = Infinity;
 
-      for (let i = 0; i < positions.count; i++) {
-        const idx = i * 4;
-        if (idx >= data.length) { rawHeights.push(0); continue; }
-        const r = data[idx], g = data[idx+1], b = data[idx+2];
-        const h = -10000 + ((r * 256 * 256 + g * 256 + b) * 0.1);
-        rawHeights.push(h);
-        if (h < minHeight) minHeight = h;
+      // 1. Generate Top Surface Vertices
+      for (let i = 0; i < gridSize; i++) {
+        const z = -halfSize + (i / segments) * sizeMeters; 
+        for (let j = 0; j < gridSize; j++) {
+            const x = -halfSize + (j / segments) * sizeMeters; 
+
+            // Calculate World Mercator Coords
+            const mx = center.x + x;
+            const my = center.y - z; 
+
+            // Map to UV
+            const u = (mx - bounds.minX) / bounds.tileSizeMeters;
+            const v = (my - bounds.minY) / bounds.tileSizeMeters;
+            const safeU = Math.max(0, Math.min(1, u));
+            const safeV = Math.max(0, Math.min(1, v));
+
+            // Image Lookup
+            const imgX = Math.floor(safeU * (img.width - 1));
+            const imgY = Math.floor((1 - safeV) * (img.height - 1));
+
+            const idx = (imgY * img.width + imgX) * 4;
+            const r = data[idx], g = data[idx+1], b = data[idx+2];
+            const h = -10000 + ((r * 256 * 256 + g * 256 + b) * 0.1);
+
+            topVertices.push(x, h, z);
+            if (h < minH) minH = h;
+        }
       }
 
-      for (let i = 0; i < positions.count; i++) {
-        const relativeH = rawHeights[i] - minHeight;
-        positions.setZ(i, (relativeH * 0.05) * exaggeration);
+      // 2. Normalize Heights (Lowest point = 0)
+      for (let i = 1; i < topVertices.length; i += 3) {
+          topVertices[i] -= minH;
       }
-      geometry.rotateX(-Math.PI / 2);
 
-      const baseGeom = new THREE.BoxGeometry(100, 2, 100);
-      baseGeom.translate(0, -1, 0);
+      // 3. Generate Bottom Vertices (Flat Base)
+      const BASE_THICKNESS = 20; // Meters thick below lowest point
+      const bottomY = -BASE_THICKNESS;
+
+      for (let i = 0; i < topVertices.length; i += 3) {
+        // x, bottomY, z
+        bottomVertices.push(topVertices[i], bottomY, topVertices[i+2]);
+      }
+
+      // 4. Generate Indices (Topology)
+      const vertexCount = gridSize * gridSize;
+
+      // Helper to add a quad (CCW)
+      const addQuad = (a: number, b: number, c: number, d: number) => {
+        indices.push(a, b, d);
+        indices.push(b, c, d);
+      };
+
+      // A. Top Surface & Bottom Surface
+      for (let i = 0; i < segments; i++) {
+        for (let j = 0; j < segments; j++) {
+          const a = i * gridSize + j;
+          const b = i * gridSize + (j + 1);
+          const c = (i + 1) * gridSize + (j + 1);
+          const d = (i + 1) * gridSize + j;
+
+          // Top (Standard winding)
+          addQuad(a, b, c, d);
+
+          // Bottom (Reversed winding to face down)
+          // Offset by vertexCount to reach bottom vertices
+          const A = a + vertexCount, B = b + vertexCount, C = c + vertexCount, D = d + vertexCount;
+          addQuad(A, D, C, B); 
+        }
+      }
+
+      // B. Sides (Stitching Top to Bottom)
+      // North Edge (i=0)
+      for (let j = 0; j < segments; j++) {
+        const top1 = j, top2 = j + 1;
+        const bot1 = top1 + vertexCount, bot2 = top2 + vertexCount;
+        addQuad(top1, bot1, bot2, top2); // Face North (Back)
+      }
+
+      // South Edge (i=segments)
+      const lastRowStart = segments * gridSize;
+      for (let j = 0; j < segments; j++) {
+        const top1 = lastRowStart + j, top2 = lastRowStart + j + 1;
+        const bot1 = top1 + vertexCount, bot2 = top2 + vertexCount;
+        addQuad(top1, top2, bot2, bot1); // Face South (Front)
+      }
+
+      // West Edge (j=0)
+      for (let i = 0; i < segments; i++) {
+        const top1 = i * gridSize, top2 = (i + 1) * gridSize;
+        const bot1 = top1 + vertexCount, bot2 = top2 + vertexCount;
+        addQuad(top1, top2, bot2, bot1); // Face West (Left)
+      }
+
+      // East Edge (j=segments)
+      for (let i = 0; i < segments; i++) {
+        const top1 = i * gridSize + segments, top2 = (i + 1) * gridSize + segments;
+        const bot1 = top1 + vertexCount, bot2 = top2 + vertexCount;
+        addQuad(top1, bot1, bot2, top2); // Face East (Right)
+      }
+
+      // 5. Final Geometry Construction
+      const geometry = new THREE.BufferGeometry();
+      const allVertices = [...topVertices, ...bottomVertices];
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(allVertices, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+
+      // --- Sampler ---
+      const sampler: HeightSampler = {
+        getHeight: (mercX: number, mercY: number) => {
+            const u = (mercX - bounds.minX) / bounds.tileSizeMeters;
+            const v = (mercY - bounds.minY) / bounds.tileSizeMeters;
+            if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+
+            const imgX = Math.floor(u * (img.width - 1));
+            const imgY = Math.floor((1 - v) * (img.height - 1));
+            const idx = (imgY * img.width + imgX) * 4;
+            const r = data[idx], g = data[idx+1], b = data[idx+2];
+            const h = -10000 + ((r * 256 * 256 + g * 256 + b) * 0.1);
+            
+            return h - minH; 
+        }
+      };
 
       resolve({
-          buildings: cleanAndStandardize(geometry), 
-          base: cleanAndStandardize(baseGeom)
+         geometry, 
+         base: new THREE.BufferGeometry(), // Empty, geometry is now the solid block
+         sampler
       });
     };
     img.onerror = () => reject("Terrain Load Failed");
   });
 };
 
-// --- ROAD FETCH ---
+// --- 4. ROADS (Smooth Draping) ---
+
 export const fetchRoadsGeometry = async (
-    centerLat: number, 
-    centerLon: number, 
-    radiusKM: number = 0.2
+  centerLat: number, 
+  centerLon: number, 
+  radiusKM: number = 1,
+  sampler?: HeightSampler
 ) => {
-    const fetchRadius = radiusKM * 1.5; 
-    const latOffset = fetchRadius / 111;
-    const lonOffset = fetchRadius / (111 * Math.cos(centerLat * Math.PI / 180));
+  const center = projectToMercator(centerLat, centerLon);
+  const fetchRadius = radiusKM * 1.5; 
+  const latOffset = fetchRadius / 111;
+  const lonOffset = fetchRadius / (111 * Math.cos(centerLat * Math.PI / 180));
+  
+  const bbox = `${centerLat - latOffset},${centerLon - lonOffset},${centerLat + latOffset},${centerLon + lonOffset}`;
+  const query = `[out:json][timeout:25];(way["highway"](${bbox}););out geom;`;
+
+  try {
+    const res = await fetch(`https://overpass.kumi.systems/api/interpreter?data=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    const elements = data.elements.filter((el: any) => el.type === 'way' && el.geometry);
     
-    const bbox = `${centerLat - latOffset},${centerLon - lonOffset},${centerLat + latOffset},${centerLon + lonOffset}`;
-
-    const query = `
-      [out:json][timeout:25];
-      (
-        way["highway"](${bbox});
-      );
-      out geom;
-    `;
-
-    const API_URL = "https://overpass.kumi.systems/api/interpreter"; 
-    
-    try {
-        const res = await fetch(`${API_URL}?data=${encodeURIComponent(query)}`);
-        if (!res.ok) throw new Error("Road API Error");
-        const data = await res.json();
-        
-        const elements = data.elements.filter((el: any) => el.type === 'way' && el.geometry);
-        const roadGeometries: THREE.BufferGeometry[] = [];
-        const scale = 50 / (radiusKM * 1000); 
-
-        const getRadius = (type: string) => {
-            if (['motorway', 'trunk', 'primary'].includes(type)) return 6;
-            if (['secondary', 'tertiary'].includes(type)) return 4;
-            if (['footway', 'pedestrian', 'path'].includes(type)) return 1.5;
-            return 2.5; 
-        };
-
-        elements.forEach((el: any) => {
-             const rawPoints: THREE.Vector3[] = [];
-             el.geometry.forEach((node: any) => {
-                 const pt = latLonToMeters(node.lat, node.lon, centerLat, centerLon);
-                 rawPoints.push(new THREE.Vector3(pt.x * scale, 0.02, -pt.y * scale)); 
-             });
-
-             if (rawPoints.length < 2) return;
-
-             const clippedPaths = clipRoadPath(rawPoints);
-
-             clippedPaths.forEach((pathPoints) => {
-                 if (pathPoints.length < 2) return;
-                 const curve = new THREE.CatmullRomCurve3(pathPoints);
-                 curve.curveType = 'centripetal'; 
-                 const radius = getRadius(el.tags.highway || 'residential') * scale * 0.5; 
-                 const tubeGeom = new THREE.TubeGeometry(curve, Math.max(pathPoints.length * 3, 4), radius, 5, false); 
-                 roadGeometries.push(cleanAndStandardize(tubeGeom));
-             });
-        });
-
-        if (roadGeometries.length > 0) {
-            return BufferGeometryUtils.mergeGeometries(roadGeometries);
-        }
-        return null;
-
-    } catch (err) {
-        console.error("Road fetch error", err);
-        return null;
-    }
-};
-
-// --- WATER FETCH ---
-export const fetchWaterGeometry = async (
-    centerLat: number, 
-    centerLon: number, 
-    radiusKM: number = 0.2
-) => {
-    const fetchRadius = radiusKM * 1.5; 
-    const latOffset = fetchRadius / 111;
-    const lonOffset = fetchRadius / (111 * Math.cos(centerLat * Math.PI / 180));
-    
-    const bbox = `${centerLat - latOffset},${centerLon - lonOffset},${centerLat + latOffset},${centerLon + lonOffset}`;
-
-    const query = `
-      [out:json][timeout:25];
-      (
-        way["natural"="water"](${bbox});
-        way["water"](${bbox});
-        way["waterway"="riverbank"](${bbox});
-        way["waterway"="dock"](${bbox});
-        relation["natural"="water"](${bbox});
-      );
-      out geom;
-    `;
-
-    const API_URL = "https://overpass.kumi.systems/api/interpreter"; 
-    
-    try {
-        const res = await fetch(`${API_URL}?data=${encodeURIComponent(query)}`);
-        if (!res.ok) throw new Error("Water API Error");
-        const data = await res.json();
-        
-        const elements = data.elements.filter((el: any) => el.type === 'way' && el.geometry);
-        const waterGeometries: THREE.BufferGeometry[] = [];
-        const scale = 50 / (radiusKM * 1000); 
-
-        // Trimming Box
-        const CLIP_BOX: any = [[[-50, -50], [50, -50], [50, 50], [-50, 50], [-50, -50]]];
-
-        elements.forEach((el: any) => {
-             const rawPoints: [number, number][] = [];
-             el.geometry.forEach((node: any) => {
-                 const pt = latLonToMeters(node.lat, node.lon, centerLat, centerLon);
-                 rawPoints.push([pt.x * scale, pt.y * scale]); 
-             });
-
-             if (rawPoints.length < 3) return;
-
-             const first = rawPoints[0];
-             const last = rawPoints[rawPoints.length - 1];
-             if (first[0] !== last[0] || first[1] !== last[1]) rawPoints.push([first[0], first[1]]);
-
-             const fixedRing = ensureCCW(rawPoints);
-             
-             try {
-                const intersection = polygonClipping.intersection([fixedRing], CLIP_BOX);
-
-                intersection.forEach((multiPoly) => {
-                    multiPoly.forEach((ring) => {
-                        if (ring.length < 3) return;
-                        
-                        const shape = new THREE.Shape();
-                        shape.moveTo(ring[0][0], ring[0][1]);
-                        for (let i = 1; i < ring.length; i++) shape.lineTo(ring[i][0], ring[i][1]);
-                        
-                        const geom = new THREE.ShapeGeometry(shape);
-                        
-                        geom.rotateX(-Math.PI / 2); // Rotates +Y to -Z
-                        geom.translate(0, 0.01, 0); // Sit slightly above base
-                        
-                        waterGeometries.push(cleanAndStandardize(geom));
-                    });
-                });
-             } catch(e) {}
-        });
-
-        if (waterGeometries.length > 0) {
-            return BufferGeometryUtils.mergeGeometries(waterGeometries);
-        }
-        return null;
-
-    } catch (err) {
-        console.error("Water fetch error", err);
-        return null;
-    }
-};
-
-// --- CITY FETCH ---
-export const fetchBuildingsGeometry = async (
-    centerLat: number, 
-    centerLon: number, 
-    radiusKM: number = 0.2,
-    setStatus?: (msg: string) => void
-) => {
-    if (setStatus) setStatus("Connecting...");
-    
-    // 1. BASEPLATE
-    const baseGeom = new THREE.BoxGeometry(100, 2, 100);
-    baseGeom.translate(0, -1, 0); 
-    const finalBase = cleanAndStandardize(baseGeom);
-
-    const fetchRadius = radiusKM * 1.5; 
-    const latOffset = fetchRadius / 111;
-    const lonOffset = fetchRadius / (111 * Math.cos(centerLat * Math.PI / 180));
-    const bbox = `${centerLat - latOffset},${centerLon - lonOffset},${centerLat + latOffset},${centerLon + lonOffset}`;
-
-    const query = `
-      [out:json][timeout:25];
-      (
-        way["building"](${bbox});
-        way["building:part"](${bbox});
-        relation["building"](${bbox});
-      );
-      out geom;
-    `;
-
-    const API_URL = "https://overpass.kumi.systems/api/interpreter"; 
-    
-    if (setStatus) setStatus("Downloading Map Data...");
-
-    let data;
-    try {
-        const res = await fetch(`${API_URL}?data=${encodeURIComponent(query)}`);
-        if (!res.ok) throw new Error("API Error");
-        data = await res.json();
-    } catch (err) {
-        return { buildings: null, base: finalBase };
-    }
-
-    if (setStatus) setStatus("Trimming & Building...");
-
-    // 2. THE COOKIE CUTTER
-    const CLIP_BOX: any = [[[-50, -50], [50, -50], [50, 50], [-50, 50], [-50, -50]]];
-    
-    const elements = data.elements.filter((el: any) => (el.type === 'way' && el.geometry));
-
-    // --- HARD LIMIT CHECK ---
-    const MAX_BUILDINGS = 25000;
-    if (elements.length > MAX_BUILDINGS) {
-        throw new Error(`Limit Exceeded: ${elements.length} buildings found (Max: ${MAX_BUILDINGS}).`);
-    }
-
-    if (elements.length === 0) return { buildings: null, base: finalBase };
-
-    const buildingGeometries: THREE.BufferGeometry[] = [];
-    const scale = 50 / (radiusKM * 1000); 
+    const roadGeoms: THREE.BufferGeometry[] = [];
+    const LIMIT = radiusKM * 1000;
 
     elements.forEach((el: any) => {
-        try {
-            const height = el.tags?.height ? parseFloat(el.tags.height) : (el.tags['building:levels'] ? parseFloat(el.tags['building:levels']) * 3.5 : 12);
-            const minHeight = el.tags?.min_height ? parseFloat(el.tags.min_height) : (el.tags['building:min_level'] ? parseFloat(el.tags['building:min_level']) * 3.5 : 0);
-            
-            if (height <= minHeight) return;
+       // 1. Collect raw path points (Flat, Y=0 initially)
+       const rawPoints: THREE.Vector3[] = [];
+       
+       el.geometry.forEach((node: any) => {
+           const merc = projectToMercator(node.lat, node.lon);
+           const x = merc.x - center.x;
+           const z = -(merc.y - center.y); 
+           
+           // Rough bounds check
+           if (Math.abs(x) < LIMIT + 100 && Math.abs(z) < LIMIT + 100) {
+             rawPoints.push(new THREE.Vector3(x, 0, z));
+           }
+       });
 
-            const rawPoints: [number, number][] = [];
-            el.geometry.forEach((node: any) => {
-                const pt = latLonToMeters(node.lat, node.lon, centerLat, centerLon);
-                rawPoints.push([pt.x * scale, pt.y * scale]);
-            });
+       if (rawPoints.length < 2) return;
 
-            if (rawPoints.length < 3) return;
+       // 2. Create a temporary curve to interpolate the X/Z path
+       const tempCurve = new THREE.CatmullRomCurve3(rawPoints);
+       const len = tempCurve.getLength();
+       // Resample every 5 meters for smooth terrain following
+       const divisions = Math.max(5, Math.floor(len / 5)); 
+       
+       const densePoints = tempCurve.getPoints(divisions);
 
-            const first = rawPoints[0];
-            const last = rawPoints[rawPoints.length - 1];
-            if (first[0] !== last[0] || first[1] !== last[1]) rawPoints.push([first[0], first[1]]);
+       // 3. Drape the dense points over the terrain
+       const finalPoints: THREE.Vector3[] = [];
+       
+       densePoints.forEach((p) => {
+         // Check limits exactly
+         if (Math.abs(p.x) > LIMIT || Math.abs(p.z) > LIMIT) return;
 
-            const fixedRing = ensureCCW(rawPoints);
-            const intersection = polygonClipping.intersection([fixedRing], CLIP_BOX);
-            
-            intersection.forEach((multiPoly) => {
-                multiPoly.forEach((ring) => {
-                    if (ring.length < 3) return;
-                    
-                    const shape = new THREE.Shape();
-                    shape.moveTo(ring[0][0], ring[0][1]);
-                    for (let i = 1; i < ring.length; i++) shape.lineTo(ring[i][0], ring[i][1]);
-                    
-                    const extrudeSettings = { steps: 1, depth: (height - minHeight) * scale, bevelEnabled: false };
-                    const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-                    
-                    if (!geom.attributes.position || geom.attributes.position.count === 0) return;
+         let y = 1.5; // Base offset (raised to prevent z-fighting)
+         if (sampler) {
+             // Convert back to world Mercator to sample height
+             const mercX = center.x + p.x;
+             const mercY = center.y - p.z; // Invert Z back to Y
+             
+             // Get height and add offset
+             y = sampler.getHeight(mercX, mercY) + 1.5; 
+         }
+         finalPoints.push(new THREE.Vector3(p.x, y, p.z));
+       });
 
-                    geom.rotateX(-Math.PI / 2); 
-                    geom.translate(0, minHeight * scale, 0); 
-                    
-                    buildingGeometries.push(cleanAndStandardize(geom));
-                });
-            });
-        } catch (e) {}
+       if (finalPoints.length < 2) return;
+
+       // 4. Create the final smooth geometry
+       const finalCurve = new THREE.CatmullRomCurve3(finalPoints);
+       finalCurve.tension = 0.5; // Smooth tension
+       
+       const tube = new THREE.TubeGeometry(finalCurve, finalPoints.length, 2, 6, false);
+       roadGeoms.push(cleanAndStandardize(tube));
     });
 
-    let finalBuildings = null;
-    if (buildingGeometries.length > 0) {
-        try {
-            finalBuildings = BufferGeometryUtils.mergeGeometries(buildingGeometries);
-        } catch (e) {
-            console.error("Merge failed", e);
-        }
-    }
+    if (roadGeoms.length === 0) return null;
+    return BufferGeometryUtils.mergeGeometries(roadGeoms);
+  } catch (err) {
+    return null;
+  }
+};
 
-    return { 
-        buildings: finalBuildings, 
-        base: finalBase 
-    };
+// --- 5. BUILDINGS (Detailed: Parts, Holes, Min-Heights) ---
+
+export const fetchBuildingsGeometry = async (
+  centerLat: number, 
+  centerLon: number, 
+  radiusKM: number = 1,
+  projectOnTerrain: boolean = false,
+  sampler?: HeightSampler,
+  setStatus?: (msg: string) => void
+) => {
+  if (setStatus) setStatus("Downloading Buildings...");
+  
+  const center = projectToMercator(centerLat, centerLon);
+  const fetchRadius = radiusKM * 1.5;
+  const latOffset = fetchRadius / 111;
+  const lonOffset = fetchRadius / (111 * Math.cos(centerLat * Math.PI / 180));
+  const bbox = `${centerLat - latOffset},${centerLon - lonOffset},${centerLat + latOffset},${centerLon + lonOffset}`;
+
+  // UPDATED QUERY: Fetch 'building:part' for details and relations
+  const query = `
+    [out:json][timeout:25];
+    (
+      way["building"](${bbox});
+      relation["building"](${bbox});
+      way["building:part"](${bbox});
+      relation["building:part"](${bbox});
+    );
+    out geom;
+  `;
+
+  try {
+    const res = await fetch(`https://overpass.kumi.systems/api/interpreter?data=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    
+    if (setStatus) setStatus("Processing Geometry...");
+
+    const elements = data.elements.filter((el: any) => 
+        (el.type === 'way' || el.type === 'relation') && 
+        el.geometry && 
+        el.tags?.location !== 'underground' // Skip subways
+    );
+
+    const buildingGeoms: THREE.BufferGeometry[] = [];
+    const LIMIT = radiusKM * 1000;
+    const CLIP_BOX: any = [[[-LIMIT, -LIMIT], [LIMIT, -LIMIT], [LIMIT, LIMIT], [-LIMIT, LIMIT], [-LIMIT, -LIMIT]]];
+
+    elements.forEach((el: any) => {
+        // 1. Calculate Top Height
+        let height = 10;
+        if (el.tags.height) {
+            height = parseFloat(el.tags.height);
+        } else if (el.tags['building:levels']) {
+            height = parseFloat(el.tags['building:levels']) * 3.5;
+        }
+
+        // 2. Calculate Base Height (Min Height)
+        let minHeight = 0;
+        if (el.tags.min_height) {
+            minHeight = parseFloat(el.tags.min_height);
+        } else if (el.tags['building:min_level']) {
+            minHeight = parseFloat(el.tags['building:min_level']) * 3.5;
+        }
+
+        // Validate heights
+        if (isNaN(height)) height = 10;
+        if (isNaN(minHeight)) minHeight = 0;
+        const actualHeight = height - minHeight;
+        if (actualHeight <= 0) return; // Skip invalid geometry
+
+        // 3. Process Geometry Points
+        const ring: [number, number][] = [];
+        let wx = 0, wy = 0, count = 0;
+
+        // Handle Relation or Way geometry
+        // Note: For relations, Overpass 'out geom' returns simplified member geometry. 
+        // We treat the outer ring of relations as the shape for simplicity in this visualizer.
+        const nodes = el.geometry || (el.members && el.members[0] && el.members[0].geometry);
+        if (!nodes) return;
+
+        nodes.forEach((node: any) => {
+            if (!node.lat || !node.lon) return;
+            const merc = projectToMercator(node.lat, node.lon);
+            wx += merc.x; wy += merc.y; count++; 
+            ring.push([merc.x - center.x, merc.y - center.y]);
+        });
+
+        if (count > 0) { wx /= count; wy /= count; }
+        if (ring.length === 0) return;
+
+        // Close the ring if open
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) ring.push(first);
+
+        const fixedRing = ensureCCW(ring);
+        
+        try {
+            // Clip against the world box
+            const clipped = polygonClipping.intersection([fixedRing], CLIP_BOX);
+            
+            // Iterate over MultiPolygons
+            clipped.forEach((polygon) => {
+                // Polygon Structure: [ExteriorRing, HoleRing1, HoleRing2...]
+                if (polygon.length === 0) return;
+
+                const shape = new THREE.Shape();
+                
+                // A. Exterior Ring (Index 0)
+                const exterior = polygon[0];
+                if (exterior.length < 3) return;
+                shape.moveTo(exterior[0][0], exterior[0][1]);
+                for (let i = 1; i < exterior.length; i++) {
+                    shape.lineTo(exterior[i][0], exterior[i][1]);
+                }
+
+                // B. Holes (Indices 1+)
+                for (let k = 1; k < polygon.length; k++) {
+                    const holeRing = polygon[k];
+                    if (holeRing.length < 3) continue;
+                    const holePath = new THREE.Path();
+                    holePath.moveTo(holeRing[0][0], holeRing[0][1]);
+                    for (let i = 1; i < holeRing.length; i++) {
+                        holePath.lineTo(holeRing[i][0], holeRing[i][1]);
+                    }
+                    shape.holes.push(holePath);
+                }
+
+                // C. Extrusion
+                const extrudeSettings = { 
+                    steps: 1, 
+                    depth: actualHeight, 
+                    bevelEnabled: false 
+                };
+                
+                const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+
+                // Rotate to sit on ground (X-90)
+                geom.rotateX(-Math.PI / 2); 
+                
+                // Calculate Terrain Offset
+                let terrainOffset = 0;
+                if (projectOnTerrain && sampler) {
+                    terrainOffset = sampler.getHeight(wx, wy);
+                }
+
+                // Apply Min-Height (e.g. for bridges) + Terrain Height
+                geom.translate(0, minHeight + terrainOffset, 0);
+
+                buildingGeoms.push(cleanAndStandardize(geom));
+            });
+        } catch (e) {
+            // console.warn("Building Error", e);
+        }
+    });
+
+    if (buildingGeoms.length === 0) return null;
+    return BufferGeometryUtils.mergeGeometries(buildingGeoms);
+
+  } catch (err) {
+    console.error("Fetch Buildings Error:", err);
+    return null;
+  }
 };

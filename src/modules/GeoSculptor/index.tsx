@@ -21,12 +21,12 @@ import { PaymentModal } from '../../components/PaymentModal';
 import { usePayment } from '../../hooks/usePayment';
 import { GeoView } from './GeoView';
 import { MapSelector, MapSelectorRef } from './MapSelector';
-import { 
-    fetchTerrainGeometry, 
-    fetchBuildingsGeometry, 
-    fetchRoadsGeometry, 
-    fetchWaterGeometry 
-} from '../../utils/geoEngine';
+
+// --- NEW IMPORTS (Split Structure) ---
+import { fetchBuildingsGeometry } from '../../utils/geo/geoEngine';
+import { fetchTerrainGeometry } from '../../utils/geo/fetchTerrain';
+import { fetchRoadsGeometry } from '../../utils/geo/fetchRoads';
+import { fetchWaterGeometry } from '../../utils/geo/fetchWater';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 

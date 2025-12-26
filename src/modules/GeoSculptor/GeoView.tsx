@@ -51,7 +51,7 @@ const HudButton = ({ onClick, icon: Icon, text, subtext, active = false, warning
   </button>
 );
 
-// --- 🎥 DETERMINISTIC CAMERA CONTROLLER ---
+// --- 🎥 CAMERA CONTROLLER ---
 const CameraController = ({ 
   viewMode, 
   setViewMode 
@@ -60,7 +60,6 @@ const CameraController = ({
   setViewMode: (v: string) => void;
 }) => {
   const { camera, controls } = useThree();
-  
   const isAnimating = useRef(false);
   const startTime = useRef(0);
   const DURATION = 1.2;
@@ -70,9 +69,7 @@ const CameraController = ({
   const endPos = useRef(new THREE.Vector3());
   const endTarget = useRef(new THREE.Vector3());
 
-  const easeInOutCubic = (t: number) => {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  };
+  const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
   useEffect(() => {
     if (viewMode === 'idle' || !controls) return;
@@ -80,24 +77,14 @@ const CameraController = ({
 
     startPos.current.copy(camera.position);
     startTarget.current.copy(orb.target);
-
     const center = orb.target.clone();
     endTarget.current.copy(center); 
 
     switch (viewMode) {
-      case 'top':
-        endPos.current.set(center.x, center.y + 500, center.z + 1); 
-        break;
-      case 'angle':
-        // Standard Isometric View (Diagonal)
-        endPos.current.set(center.x + 300, center.y + 300, center.z + 300); 
-        break;
-      case 'low':
-        endPos.current.set(center.x, center.y + 20, center.z + 400); 
-        break;
-      default:
-        isAnimating.current = false;
-        return;
+      case 'top': endPos.current.set(center.x, center.y + 500, center.z + 1); break;
+      case 'angle': endPos.current.set(center.x + 300, center.y + 300, center.z + 300); break;
+      case 'low': endPos.current.set(center.x, center.y + 20, center.z + 400); break;
+      default: isAnimating.current = false; return;
     }
 
     orb.enabled = false;
@@ -109,11 +96,9 @@ const CameraController = ({
   useFrame(() => {
     if (!isAnimating.current || !controls) return;
     const orb = controls as any;
-
     const now = performance.now();
     const elapsed = (now - startTime.current) / 1000; 
     let t = Math.min(1, elapsed / DURATION); 
-    
     const smoothedT = easeInOutCubic(t);
 
     camera.position.lerpVectors(startPos.current, endPos.current, smoothedT);
@@ -143,14 +128,13 @@ const SceneContent = ({
   isBaseEnabled 
 }: { modelData: any, color: string, autoRotate: boolean, isBaseEnabled: boolean }) => {
   
-  // --- UPDATED PALETTE (Midnight Ceramic) ---
-  const VIBE_CYAN = "#ffffffff";      // Ceramic White (Zinc-200)
-  const VIBE_DARK_BASE = "#27272a"; // Graphite Base (Zinc-800)
-  const VIBE_ROAD = "555555ff";      // Matte Slate (Zinc-600)
-  const VIBE_WATER = "#2467f7ff";     // Electric Sapphire (Blue-600)
+  // --- COLORS UPDATED FOR BETTER CONTRAST ---
+  const VIBE_CYAN = "#e4e4e7";      // Ceramic White for Buildings
+  const VIBE_DARK_BASE = "#18181b"; // Almost Black for Base
+  const VIBE_ROAD = "#52525b";      // Grey for Roads
+  const VIBE_WATER = "#0066cc";     // DEEP BLUE (Not light blue, to avoid looking white)
 
-  // --- GARBAGE COLLECTION ---
-  // When this component unmounts or modelData changes, this cleans up the GPU memory.
+  // Clean up memory when unmounting
   useEffect(() => {
     return () => {
         if (modelData) {
@@ -175,29 +159,30 @@ const SceneContent = ({
         maxPolarAngle={Math.PI / 2} 
       />
 
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[-50, 40, 50]} intensity={1.5} />
-      <directionalLight position={[50, 20, -50]} intensity={1} color={VIBE_CYAN} />
+      {/* Lighting adjusted to reduce glare */}
+      <ambientLight intensity={0.4} />
+      <directionalLight position={[-50, 40, 50]} intensity={1.2} />
+      <directionalLight position={[50, 20, -50]} intensity={0.8} color="#ffffff" />
       <Environment preset="city" />
 
       <Bounds fit clip observe margin={1.2}>
         <Center>
             <group>
-                {/* BASE - CONDITIONAL RENDER */}
+                {/* BASE */}
                 {isBaseEnabled && modelData?.base && (
                     <mesh geometry={modelData.base}>
                     <meshStandardMaterial 
                         color={VIBE_DARK_BASE} 
-                        roughness={0.6} 
-                        metalness={0.4} 
+                        roughness={0.8} 
+                        metalness={0.2} 
                         side={THREE.DoubleSide} 
                     />
                     </mesh>
                 )}
 
-                {/* ROADS */}
+                {/* ROADS - Lifted slightly to avoid z-fighting */}
                 {modelData?.roads && (
-                    <mesh geometry={modelData.roads}>
+                    <mesh geometry={modelData.roads} position={[0, 0.05, 0]}>
                         <meshStandardMaterial 
                             color={VIBE_ROAD}
                             roughness={0.9} 
@@ -206,15 +191,16 @@ const SceneContent = ({
                         />
                     </mesh>
                 )}
-                {/* WATER */}
+
+                {/* WATER - Deep Blue & Slightly Metallic */}
                 {modelData?.water && (
-                    <mesh geometry={modelData.water}>
+                    <mesh geometry={modelData.water} position={[0, 0.08, 0]}>
                         <meshStandardMaterial 
                             color={VIBE_WATER} 
-                            roughness={0.1} 
-                            metalness={0.8} 
+                            roughness={0.2} 
+                            metalness={0.1} 
                             emissive={VIBE_WATER}
-                            emissiveIntensity={0.2}
+                            emissiveIntensity={0.1} // Slight glow to ensure visibility
                             side={THREE.DoubleSide} 
                         />
                     </mesh>
@@ -225,9 +211,7 @@ const SceneContent = ({
                     <mesh geometry={modelData.buildings}>
                     <meshStandardMaterial 
                         color={color || VIBE_CYAN} 
-                        emissive={color || VIBE_CYAN}
-                        emissiveIntensity={0.3} 
-                        roughness={0.2} 
+                        roughness={0.3} 
                         metalness={0.1} 
                         flatShading={true} 
                         side={THREE.DoubleSide} 
@@ -241,7 +225,6 @@ const SceneContent = ({
   );
 };
 
-// --- Main Component ---
 export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoViewProps) => {
   const [viewMode, setViewMode] = useState<string>('idle');
   const [autoRotate, setAutoRotate] = useState<boolean>(false);
@@ -250,17 +233,14 @@ export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoVi
   const handleViewChange = (mode: string) => {
     setAutoRotate(false);
     setViewMode('idle');
-    setTimeout(() => {
-        setViewMode(mode);
-    }, 10);
+    setTimeout(() => setViewMode(mode), 10);
   };
 
   return (
         <div 
         className="w-full h-full rounded-sm overflow-hidden shadow-2xl border border-white/10 relative group flex flex-col"
-        style={{ backgroundColor: "#18181b" }} // Gunmetal Background
+        style={{ backgroundColor: "#18181b" }} 
         >      
-      {/* 1. Empty / Processing Overlay State */}
       {(!modelData || isProcessing) && (
         <div className="absolute inset-0 flex flex-col gap-4 items-center justify-center z-10 pointer-events-none bg-black/80 backdrop-blur-md">
           {isProcessing ? (
@@ -268,71 +248,50 @@ export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoVi
                <div className="w-16 h-16 border-2 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin shadow-[0_0_30px_rgba(34,211,238,0.2)]"></div>
                <div className="flex flex-col items-center mt-4">
                    <p className="text-xs font-mono tracking-[0.3em] uppercase text-cyan-400 animate-pulse">Scanning Terrain...</p>
-                   <p className="text-[9px] text-cyan-500/50 uppercase mt-1">Fetching Topography</p>
                </div>
              </>
           ) : (
              <>
                <div className="relative">
-                  <div className="absolute inset-0 bg-zinc-500/20 blur-xl rounded-full"></div>
                   <UploadCloud size={48} strokeWidth={1} className="text-zinc-600 relative z-10" />
                </div>
                <div className="flex flex-col items-center gap-1 mt-2">
                    <p className="text-sm font-bold tracking-[0.2em] uppercase text-zinc-500">System Standby</p>
-                   <p className="text-[10px] text-zinc-700 uppercase tracking-widest">Select Area to Initialize</p>
                </div>
              </>
           )}
         </div>
       )}
 
-      {/* 2. HUD Controls */}
       {modelData && (
         <div className={`absolute top-4 right-4 z-20 flex flex-col items-end transition-all duration-300 pointer-events-auto ${controlsOpen ? 'w-48' : 'w-auto'}`}>
           <button 
               onClick={() => setControlsOpen(!controlsOpen)}
-              className={`
-                  flex items-center py-1.5 px-2 mb-1 hover:bg-white/5 rounded transition-colors group cursor-pointer border border-transparent hover:border-white/5
-                  ${controlsOpen ? 'w-full justify-between' : 'w-fit justify-center gap-2 self-end'}
-              `}
+              className={`flex items-center py-1.5 px-2 mb-1 hover:bg-white/5 rounded transition-colors group cursor-pointer border border-transparent hover:border-white/5 ${controlsOpen ? 'w-full justify-between' : 'w-fit justify-center gap-2 self-end'}`}
           >
               {controlsOpen ? (
                   <div className="flex flex-col items-start">
                       <span className="text-[9px] font-mono text-cyan-500 uppercase tracking-[0.2em]">GEO_SAT_CAM</span>
-                      <span className="text-[7px] text-zinc-500 uppercase tracking-widest">v4.0 LINKED</span>
                   </div>
               ) : (
                   <Video size={14} className="text-cyan-500/50 group-hover:text-cyan-400" />
               )}
-              
               <div className="flex items-center gap-2">
-                   {controlsOpen && <div className="w-1 h-1 bg-cyan-500 rounded-full animate-pulse"></div>}
                    {controlsOpen ? <ChevronUp size={12} className="text-zinc-600 group-hover:text-white"/> : <ChevronDown size={12} className="text-zinc-600 group-hover:text-white"/>}
               </div>
           </button>
-
-          <div className={`
-              w-full overflow-hidden transition-all duration-300 ease-in-out bg-black/20 backdrop-blur-sm border-white/5 shadow-lg
-              ${controlsOpen ? 'max-h-80 opacity-100 border p-1' : 'max-h-0 opacity-0 border-0 p-0'}
-          `}>
+          <div className={`w-full overflow-hidden transition-all duration-300 ease-in-out bg-black/20 backdrop-blur-sm border-white/5 shadow-lg ${controlsOpen ? 'max-h-80 opacity-100 border p-1' : 'max-h-0 opacity-0 border-0 p-0'}`}>
               <div className="flex flex-col gap-1">
                   <HudButton onClick={() => handleViewChange('top')} icon={ArrowUpFromLine} text="Satellite" subtext="AXIS: Y-POS" />
                   <HudButton onClick={() => handleViewChange('angle')} icon={Globe} text="Isometric" subtext="ANGLED VIEW" />
                   <HudButton onClick={() => handleViewChange('low')} icon={Layers} text="Horizon" subtext="LOW ALTITUDE" />
                   <div className="h-px bg-zinc-800/50 my-1 mx-2" />
-                  <HudButton 
-                      onClick={() => setAutoRotate(!autoRotate)} 
-                      icon={Orbit} 
-                      text="Drone Orbit" 
-                      subtext={autoRotate ? "ROTATION: ACTIVE" : "AUTO-PAN"} 
-                      active={autoRotate}
-                  />
+                  <HudButton onClick={() => setAutoRotate(!autoRotate)} icon={Orbit} text="Drone Orbit" subtext={autoRotate ? "ROTATION: ACTIVE" : "AUTO-PAN"} active={autoRotate} />
               </div>
           </div>
         </div>
       )}
 
-      {/* 3. Bottom Info Panel */}
       {modelData && (
         <div className="absolute bottom-4 left-4 z-20 pointer-events-none opacity-80">
            <div className="flex flex-col gap-1 text-[9px] font-mono text-cyan-400/80 uppercase tracking-wider">
@@ -344,21 +303,9 @@ export const GeoView = ({ modelData, color, isProcessing, isBaseEnabled }: GeoVi
         </div>
       )}
 
-      {/* 4. Canvas */}
-      <Canvas 
-          dpr={[1, 1.5]} 
-          className="w-full h-full"
-          camera={{ position: [150, 150, 150], fov: 45 }} 
-      >
+      <Canvas dpr={[1, 1.5]} className="w-full h-full" camera={{ position: [150, 150, 150], fov: 45 }}>
           <CameraController viewMode={viewMode} setViewMode={setViewMode} />
-          {modelData && (
-             <SceneContent 
-                modelData={modelData} 
-                color={color} 
-                autoRotate={autoRotate} 
-                isBaseEnabled={isBaseEnabled} 
-             />
-          )}
+          {modelData && <SceneContent modelData={modelData} color={color} autoRotate={autoRotate} isBaseEnabled={isBaseEnabled} />}
       </Canvas>
     </div>
   );

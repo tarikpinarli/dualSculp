@@ -1,12 +1,12 @@
 import base64
 import os
 import time
+import shutil  # <--- NEW: Needed for deleting old folders
 import trimesh
 import numpy as np
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room
-from flask import send_from_directory # <--- ADD THIS
 
 # 1. SETUP - Create the App and Socket BEFORE using them
 app = Flask(__name__)
@@ -17,6 +17,29 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 UPLOAD_FOLDER = 'scans'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# --- THE JANITOR (Clean up old files) ---
+def cleanup_storage():
+    """Deletes sessions older than 1 hour to save space."""
+    try:
+        current_time = time.time()
+        # 1 hour in seconds (Files older than this get deleted)
+        MAX_AGE = 3600 
+        
+        # Check if folder exists
+        if os.path.exists(UPLOAD_FOLDER):
+            for folder_name in os.listdir(UPLOAD_FOLDER):
+                folder_path = os.path.join(UPLOAD_FOLDER, folder_name)
+                
+                # If it's a directory, check its age
+                if os.path.isdir(folder_path):
+                    folder_age = current_time - os.path.getmtime(folder_path)
+                    
+                    if folder_age > MAX_AGE:
+                        print(f"🧹 Janitor: Deleting old session {folder_name}")
+                        shutil.rmtree(folder_path) # Delete the whole folder
+    except Exception as e:
+        print(f"Janitor Error: {e}")
 
 # 3. ROUTES & EVENTS
 @app.route('/')
@@ -40,6 +63,9 @@ def handle_connect():
 
 @socketio.on('join_session')
 def handle_join(data):
+    # TRIGGER THE JANITOR whenever a new person joins!
+    cleanup_storage()
+
     room = data.get('sessionId')
     device_type = data.get('type')
     

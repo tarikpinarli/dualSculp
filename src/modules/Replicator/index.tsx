@@ -5,84 +5,154 @@ import { Header } from '../../components/layout/Header';
 import { Footer } from '../../components/layout/Footer';
 import { QrHandshake } from './components/QrHandshake';
 import { ModelViewer } from './components/ModelViewer';
-import { Cpu, ScanLine, Smartphone, Layers, Box, Loader2, Download } from 'lucide-react';
+import { Cpu, ScanLine, Smartphone, Box, Loader2, Download, Camera } from 'lucide-react';
 
 // --- CONFIGURATION ---
-
-// 1. BASE_URL: Used for fetching the 3D file (STL)
-// If on Vercel (PROD), use your Render URL. If Local (DEV), use empty string (to use Vite Proxy).
-const BASE_URL = import.meta.env.PROD 
-    ? "https://replicator-backend.onrender.com"
+const BACKEND_URL = import.meta.env.PROD 
+    ? "https://replicator-backend.onrender.com" // Used for file downloads
     : ""; 
 
-// 2. SOCKET_URL: Used for the real-time connection
-// If on Vercel (PROD), use your Render URL. If Local (DEV), use "/" (Vite Proxy).
 const SOCKET_URL = import.meta.env.PROD 
-    ? "https://replicator-backend.onrender.com"
+    ? "https://replicator-backend.onrender.com" // Used for WebSocket connection
     : "/";
 
 export default function Replicator() {
-  const [sessionId, setSessionId] = useState<string>('');
+  // 1. Detect Mode: If URL has "?session=", we are a Mobile Sensor
+  const queryParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const urlSessionId = queryParams.get('session');
+  const isMobile = !!urlSessionId; 
+
+  // State
+  const [sessionId, setSessionId] = useState<string>(urlSessionId || '');
   const [isConnected, setIsConnected] = useState(false);
   const [frames, setFrames] = useState<string[]>([]);
-  
-  // Processing States
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [modelReady, setModelReady] = useState(false);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
 
-  // Socket Reference
   const socketRef = useRef<Socket | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // 1. Generate Session ID
-    const newSession = uuidv4().slice(0, 8).toUpperCase();
-    setSessionId(newSession);
+    // Generate Session ID only if we are Desktop Host (not mobile)
+    let currentSession = sessionId;
+    if (!isMobile && !sessionId) {
+        currentSession = uuidv4().slice(0, 8).toUpperCase();
+        setSessionId(currentSession);
+    }
 
-    // 2. Connect to Backend
-    console.log("Connecting to:", SOCKET_URL);
+    // Connect to Socket
     const socket = io(SOCKET_URL);
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log("Desktop connected to socket switchboard");
-      socket.emit('join_session', { sessionId: newSession, type: 'host' });
+      console.log(isMobile ? "Mobile Sensor Connected" : "Desktop Host Connected");
+      // Identify role to the server
+      socket.emit('join_session', { 
+          sessionId: currentSession, 
+          type: isMobile ? 'sensor' : 'host' 
+      });
     });
 
-    // 3. Listen for Events
     socket.on('session_status', (data) => {
       if (data.status === 'connected') setIsConnected(true);
     });
 
+    // Desktop: Receive Images
     socket.on('frame_received', (data) => {
         setFrames(prev => [...prev, data.image]);
     });
 
+    // Desktop: Receive Status Updates
     socket.on('processing_status', (data) => {
         setIsProcessing(true);
         setStatusMessage(data.step);
     });
 
+    // Desktop: Receive Final Model
     socket.on('model_ready', (data) => {
         setIsProcessing(false);
         setStatusMessage("Mesh Compilation Complete.");
         setModelReady(true);
-        setModelUrl(data.url); // Save the filename
+        setModelUrl(data.url);
     });
 
-    // Cleanup
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, []); // Run once on mount
 
+  // --- MOBILE ACTIONS ---
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && socketRef.current) {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const base64 = evt.target?.result as string;
+            // Emit to server
+            socketRef.current?.emit('send_frame', { 
+                roomId: sessionId, 
+                image: base64 
+            });
+            alert("Image Sent!"); // Simple feedback for now
+        };
+        reader.readAsDataURL(file);
+    }
+  };
+
+  // --- DESKTOP ACTIONS ---
   const handleGenerate = () => {
       if (socketRef.current) {
           socketRef.current.emit('process_3d', { sessionId });
       }
   };
 
+  // ==========================================
+  // RENDER: MOBILE VIEW (SENSOR INTERFACE)
+  // ==========================================
+  if (isMobile) {
+      return (
+        <div className="bg-black min-h-screen flex flex-col items-center justify-center p-6 text-white">
+            <div className="w-full max-w-md space-y-8 text-center">
+                <div className="mb-8">
+                    <ScanLine size={64} className="text-cyan-500 mx-auto mb-4 animate-pulse" />
+                    <h1 className="text-4xl font-black uppercase italic">Sensor <span className="text-cyan-500">Online</span></h1>
+                    <p className="text-zinc-500 font-mono text-xs mt-2">LINKED TO SESSION: {sessionId}</p>
+                </div>
+
+                <div className="p-8 border border-zinc-800 rounded-3xl bg-zinc-900/50 backdrop-blur">
+                    <input 
+                        type="file" 
+                        accept="image/*" 
+                        capture="environment" // Forces back camera
+                        className="hidden" 
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                    />
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full py-6 bg-cyan-500 text-black font-black text-xl uppercase rounded-xl hover:scale-105 transition-transform flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(6,182,212,0.4)]"
+                    >
+                        <Camera size={28} />
+                        Capture Scan
+                    </button>
+                    <p className="text-zinc-500 text-[10px] uppercase tracking-widest mt-4">
+                        Tap to transmit optical data to host
+                    </p>
+                </div>
+
+                <div className="text-zinc-600 text-xs font-bold uppercase">
+                    Keep this tab open while scanning
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  // ==========================================
+  // RENDER: DESKTOP VIEW (HOST INTERFACE)
+  // ==========================================
   return (
     <div className="bg-zinc-950 min-h-screen text-white selection:bg-cyan-500 selection:text-black">
       <Header />
@@ -102,6 +172,7 @@ export default function Replicator() {
           
           {/* LEFT COLUMN: Controls */}
           <div className="space-y-8">
+             {/* Step 1: Status */}
              <div className="flex gap-4 items-start group">
                 <div className={`p-3 rounded-lg border transition-colors ${isConnected ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-zinc-900 border-zinc-800 text-cyan-500'}`}>
                     <Smartphone size={24} />
@@ -109,11 +180,12 @@ export default function Replicator() {
                 <div>
                     <h3 className="text-xl font-black uppercase italic text-white mb-2">1. Establish Uplink</h3>
                     <p className="text-zinc-500 text-xs font-bold uppercase leading-relaxed max-w-sm">
-                        {isConnected ? "Device Paired Successfully." : "Connect your mobile device."}
+                        {isConnected ? "Device Paired Successfully." : "Scan QR to connect sensor."}
                     </p>
                 </div>
              </div>
 
+             {/* Step 2: Collection */}
              <div className={`flex gap-4 items-start transition-opacity ${isConnected ? 'opacity-100' : 'opacity-50'}`}>
                 <div className={`p-3 rounded-lg border transition-colors ${frames.length > 0 ? 'bg-cyan-500/10 border-cyan-500 text-cyan-500' : 'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
                     <ScanLine size={24} />
@@ -127,7 +199,7 @@ export default function Replicator() {
                 </div>
              </div>
 
-             {/* GENERATE BUTTON */}
+             {/* Step 3: Action Button */}
              <div className={`transition-all duration-500 ${frames.length >= 3 ? 'opacity-100 translate-x-0' : 'opacity-30 translate-x-[-10px] pointer-events-none'}`}>
                  <button 
                     onClick={handleGenerate}
@@ -156,20 +228,17 @@ export default function Replicator() {
           {/* RIGHT COLUMN: Viewport */}
           <div className="flex justify-center">
             {!isConnected ? (
-                // State 1: Disconnected
+                // State 1: Disconnected (Show QR)
                 <div className="w-full max-w-md">
                     <QrHandshake sessionId={sessionId} />
                 </div>
             ) : (
-                // State 2: Connected
+                // State 2: Connected (Show Viewport)
                 <div className="w-full h-96 bg-zinc-900/30 border border-cyan-500/50 rounded-[3rem] relative overflow-hidden flex items-center justify-center group">
-                    
                     {modelReady && modelUrl ? (
-                        // SUB-STATE: 3D VIEWER (Success)
+                        // SUCCESS: 3D Viewer
                         <div className="w-full h-full relative animate-in fade-in zoom-in duration-1000">
-                             {/* THE MAGIC LINE: Connects Frontend to Backend File Storage */}
-                             <ModelViewer url={`${BASE_URL}/files/${sessionId}/${modelUrl}`} />
-                             
+                             <ModelViewer url={`${BACKEND_URL}/files/${sessionId}/${modelUrl}`} />
                              <div className="absolute top-6 left-6 pointer-events-none">
                                 <div className="bg-emerald-500/10 backdrop-blur border border-emerald-500 text-emerald-500 font-mono text-xs px-3 py-1.5 rounded-full flex items-center gap-2">
                                     <Box size={12} />
@@ -179,7 +248,7 @@ export default function Replicator() {
                         </div>
                     ) : (
                         frames.length > 0 ? (
-                            // SUB-STATE: IMAGE STACK (Scanning)
+                            // SCANNING: Show Latest Photo
                             <div className="relative w-full h-full p-2">
                                 <img 
                                     src={frames[frames.length - 1]} 
@@ -196,7 +265,7 @@ export default function Replicator() {
                                 )}
                             </div>
                         ) : (
-                            // SUB-STATE: WAITING (Ready)
+                            // WAITING: Ready State
                             <div className="text-center relative z-10 animate-pulse">
                                 <Cpu size={64} className="text-cyan-500 mx-auto mb-6" />
                                 <h2 className="text-3xl font-black uppercase text-white italic tracking-tighter">
@@ -208,14 +277,9 @@ export default function Replicator() {
                             </div>
                         )
                     )}
-                    
-                    {!frames.length && !modelReady && (
-                        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
-                    )}
                 </div>
             )}
           </div>
-
         </div>
       </div>
       <Footer />

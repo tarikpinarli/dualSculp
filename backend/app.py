@@ -118,6 +118,7 @@ def generate_mesh_with_api(image_urls, output_path):
 # --- ROUTES ---
 @app.route('/')
 @app.route('/health')
+@app.route('/ping')
 def health_check():
     return "Replicator Engine Online", 200
 

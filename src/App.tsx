@@ -9,13 +9,16 @@ import Pricing from './pages/Pricing';
 import Hub from './pages/Hub';
 import Showcase from './pages/Showcase';
 
-// --- TOOL MODULES (Using your specified names/paths) ---
+// --- TOOL MODULES ---
 import GeoSculptorModule from './modules/GeoSculptor';
 import WallArtModule from './modules/WallArt';
 import IntersectionModule from './modules/Intersection';
 
+// --- NEW REPLICATOR MODULE ---
+import Replicator from './modules/Replicator';
+import MobileSensor from './modules/Replicator/MobileSensor';
+
 // --- UTILS ---
-// Helper to force scroll to top on page change
 function ScrollToTop() {
   const { pathname } = useLocation();
   useEffect(() => {
@@ -31,7 +34,6 @@ function App() {
   useEffect(() => {
     const warmUp = async () => {
       try {
-        // Wakes up Render while user browses the landing page
         await fetch(`${BACKEND_URL}/ping`, { mode: 'no-cors' });
       } catch (e) {
         console.log("📡 Server wake-up signal sent.");
@@ -46,23 +48,22 @@ function App() {
       
       <div className="min-h-screen bg-zinc-950">
         <Routes>
-          {/* MARKETING PAGES 
-              Note: The <Header /> is inside these individual files 
-              so it doesn't overlap your 3D tools.
-          */}
+          {/* MARKETING PAGES */}
           <Route path="/" element={<Landing />} />
           <Route path="/solutions" element={<Solutions />} />
           <Route path="/technology" element={<Technology />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/showcase" element={<Showcase />} />
 
-          {/* TOOL MODULES 
-              These will now be full-screen without the marketing header.
-          */}
+          {/* TOOL MODULES */}
           <Route path="/geo" element={<GeoSculptorModule />} />
           <Route path="/wall-art" element={<WallArtModule />} />
           <Route path="/app/intersection" element={<IntersectionModule />} />
           <Route path="/hub" element={<Hub />} />
+
+          {/* REPLICATOR ENGINE (New) */}
+          <Route path="/replicator" element={<Replicator />} />
+          <Route path="/sensor/:id" element={<MobileSensor />} />
 
           {/* 404 CATCH-ALL */}
           <Route 
